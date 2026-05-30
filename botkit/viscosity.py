@@ -102,6 +102,45 @@ def regress_lbc(props: Dict[str, np.ndarray], params0: LBCParameters) -> LBCPara
     return LBCParameters(*res.x, coeffs=params0.coeffs)
 
 
+def regress_node_densities(props: Dict[str, np.ndarray], params: LBCParameters,
+                           tol: float = 1e-3, bounds=(1.0, 60.0)):
+    """Per-node critical densities (den_co, den_cg) reproducing observed viscosity.
+
+    At each node the pair (den_co, den_cg) is solved so LBC matches the observed
+    oil and gas viscosities.  Returns the two arrays plus a reliability mask:
+    False where LBC cannot reproduce both viscosities within ``tol`` (the
+    ill-conditioned low-pressure nodes), which are dropped before the trend is
+    extrapolated.  This delivers the observed viscosities exactly and gives a
+    smooth, physical critical-density trend to extend.
+    """
+    from scipy.optimize import least_squares
+    xo, xg, yo, yg = props["xo"], props["xg"], props["yo"], props["yg"]
+    uo, ug = props["uo"], props["ug"]
+    deno, deng = props["deno"], props["deng"]
+    n = len(uo)
+    dco, dcg, ok = np.empty(n), np.empty(n), np.zeros(n, bool)
+    for i in range(n):
+        def residual(z):
+            p = LBCParameters(z[0], z[1], params.xi_o, params.xi_g,
+                              params.u_o, params.u_g, params.coeffs)
+            return [p.phase_viscosity(xo[i], xg[i], deno[i]) - uo[i],
+                    p.phase_viscosity(yo[i], yg[i], deng[i]) - ug[i]]
+        sol = least_squares(residual, [params.den_co, params.den_cg],
+                            bounds=([bounds[0]] * 2, [bounds[1]] * 2), xtol=1e-12)
+        dco[i], dcg[i] = sol.x
+        rel_err = np.max(np.abs(residual(sol.x)) / np.array([uo[i], ug[i]]))
+        ok[i] = rel_err < tol
+    return dco, dcg, ok
+
+
+def viscosity_from_densities(params: LBCParameters, den_co: float, den_cg: float,
+                             fo: float, fg: float, phase_density: float) -> float:
+    """LBC viscosity using node-specific critical densities."""
+    p = LBCParameters(den_co, den_cg, params.xi_o, params.xi_g,
+                      params.u_o, params.u_g, params.coeffs)
+    return p.phase_viscosity(fo, fg, phase_density)
+
+
 def lbc_match_error(props: Dict[str, np.ndarray], params: LBCParameters) -> float:
     """Maximum relative viscosity error over all nodes."""
     xo, xg, yo, yg = props["xo"], props["xg"], props["yo"], props["yg"]

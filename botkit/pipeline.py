@@ -47,6 +47,8 @@ class FitResult:
     eos_pressure_error: float
     eos_trusted: bool
     repairs: list = field(default_factory=list)
+    den_co_fn: object = None  # extrapolator for the oil critical density vs p
+    den_cg_fn: object = None  # extrapolator for the gas critical density vs p
 
 
 @dataclass
@@ -160,10 +162,29 @@ def fit(table: BlackOilTable, config: Config, diag: Optional[Diagnostics] = None
     lbc0 = _visc.initial_lbc(s, params.T, Tco, Pco, Tcg, Pcg)
     lbc = _visc.regress_lbc(props, lbc0)
 
+    # Per-node viscosity critical densities (VcVis, as rho_c = M/Vc_vis)
+    # reproducing the observed viscosities, with the ill-conditioned low-pressure
+    # nodes dropped. VcVis is a component property, so above the table it is held
+    # flat at the last reliable value (reproducing the observed viscosity at the
+    # join); the viscosity then varies through the EOS phase density and
+    # composition. The per-node trend can optionally be extrapolated instead.
+    den_co, den_cg, ok = _visc.regress_node_densities(props, lbc,
+                                                      tol=config.vc_reliability_tol)
+    pr = props["p"][ok]
+    if pr.size >= 2 and config.extrapolate_vc_trend:
+        den_co_fn, _ = _eos.trend_extrapolator(pr, den_co[ok], 4, config.oil_vc_abscissa)
+        den_cg_fn, _ = _eos.trend_extrapolator(pr, den_cg[ok], 4, config.gas_vc_abscissa)
+    elif pr.size >= 1:  # hold VcVis flat at the last reliable node (clamped)
+        den_co_fn = lambda p, x=pr, y=den_co[ok]: np.interp(p, x, y)
+        den_cg_fn = lambda p, x=pr, y=den_cg[ok]: np.interp(p, x, y)
+    else:  # no reliable nodes; fall back to the global LBC densities
+        den_co_fn = lambda p, v=lbc.den_co: np.full_like(np.asarray(p, float), v)
+        den_cg_fn = lambda p, v=lbc.den_cg: np.full_like(np.asarray(p, float), v)
+
     return FitResult(trusted=trusted, props=props, params=params, lbc=lbc,
                      so_tab=so_tab, sg_tab=sg_tab, Pk=Pk, cut=cut,
                      eos_pressure_error=err, eos_trusted=eos_trusted,
-                     repairs=repairs)
+                     repairs=repairs, den_co_fn=den_co_fn, den_cg_fn=den_cg_fn)
 
 
 def build(table: BlackOilTable, config: Config,
@@ -235,14 +256,23 @@ def build(table: BlackOilTable, config: Config,
     p_ext, ko_ext, kg_ext = extrapolate_kvalues(
         psat, props["ko"], props["kg"], fr.Pk, config.n_extension_nodes,
         anchor=config.first_extrap_node)
-    # measured viscosity at the extrapolation anchor, to keep the regenerated
-    # viscosity continuous with the table across the join
-    a = config.first_extrap_node
     ext = extend_saturated(p_ext, ko_ext, kg_ext, fr.params, fr.lbc, s,
                            max_psat=float(psat.max()),
-                           so_interp=so_interp, sg_interp=sg_interp,
-                           anchor_uo=float(trusted["uo"][a]),
-                           anchor_ug=float(trusted["ug"][a]))
+                           so_interp=so_interp, sg_interp=sg_interp)
+
+    # Recompute the extension viscosity from LBC with the per-node critical
+    # densities extrapolated along their trend (den_co in log p, den_cg in 1/p).
+    # This reproduces the observed viscosity at the join and extends a smooth,
+    # physical critical-density trend rather than a single global value.
+    kve = kvalues(ext["rs"], ext["rv"], s)
+    dco_e = np.asarray(fr.den_co_fn(ext["p"]), dtype=float)
+    dcg_e = np.asarray(fr.den_cg_fn(ext["p"]), dtype=float)
+    ext["uo"] = np.array([_visc.viscosity_from_densities(
+        fr.lbc, dco_e[i], dcg_e[i], kve["xo"][i], kve["xg"][i], ext["deno"][i])
+        for i in range(len(ext["p"]))])
+    ext["ug"] = np.array([_visc.viscosity_from_densities(
+        fr.lbc, dco_e[i], dcg_e[i], kve["yo"][i], kve["yg"][i], ext["deng"][i])
+        for i in range(len(ext["p"]))])
     if ext["folded_at"] is not None:
         fold = ext["folded_at"]
         prop = ext.get("fold_property") or "Bo or Bg"

@@ -180,6 +180,13 @@ class Config:
     oil_shift_abscissa: str = "log"       # transform linearising the oil shift trend
     gas_shift_abscissa: str = "linear"    # transform linearising the gas shift trend
     truncate_at_fold: bool = True         # stop the extension at a near-critical fold
+    vc_reliability_tol: float = 1e-3      # drop a node's VcVis if LBC misses its
+                                          # viscosities by more than this fraction
+    extrapolate_vc_trend: bool = False    # hold VcVis flat above the table (it is
+                                          # a component property; the per-node
+                                          # variation is LBC error absorption)
+    oil_vc_abscissa: str = "log"          # transform linearising the oil VcVis trend
+    gas_vc_abscissa: str = "recip"        # transform linearising the gas VcVis trend
 
     # EOS
     eos_fallback_tol: float = 0.05  # disable EOS paths if it misses table by >5%

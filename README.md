@@ -219,6 +219,16 @@ Zero reproduces the exact per-node fit. A small value gives smooth, monotone shi
 trends at a sub-1% in-sample molar-volume cost, which extrapolate more
 defensibly than a noisy fit.
 
+Viscosity. The LBC viscosity is `f(rho / rho_pc)`, where `rho` is the phase
+density from the EOS and `rho_pc` is the viscosity pseudo-critical density set by
+the per-component VcVis. VcVis is regressed at each node to reproduce the
+observed viscosities (the ill-conditioned low-pressure nodes are dropped), then
+held flat above the table because VcVis is a component property; the per-node
+variation is the LBC absorbing model error, like the volume shift. The extension
+viscosity therefore reproduces the observed value at the join and varies above it
+through the EOS density and composition. Setting `extrapolate_vc_trend = True`
+extrapolates the VcVis trend instead (oil in log p, gas in 1/p).
+
 Near-critical fold. Extending to a high Pk drives the fluid toward its critical
 point, where the K-value extrapolation can fold (Bo or Bg reversing). The fold is
 detected and the extension truncated below it.
