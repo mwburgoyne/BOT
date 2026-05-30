@@ -28,7 +28,8 @@ from .kvalues import convergence_pressure, kvalues, phase_properties
 from .model import (AUTO, Anomaly, BlackOilTable, ChangeLog, Config,
                     Diagnostics, PVTGTable, PVTOTable, Severity)
 from .qc import (_shared_locus, detect_undersaturated_compressibility,
-                 detect_undersaturated_compressibility_trend, loo_predict, run_qc)
+                 detect_undersaturated_compressibility_trend,
+                 discontinuous_above_cut, loo_predict, run_qc)
 
 
 @dataclass
@@ -182,13 +183,21 @@ def build(table: BlackOilTable, config: Config,
     n_o_drop = int(np.sum(table.pvto.p > fr.cut * 1.0001))
     n_g_drop = int(np.sum(table.pvtg.p > fr.cut * 1.0001))
     if n_o_drop or n_g_drop:
+        disc = discontinuous_above_cut(table, fr.cut)
+        if disc:
+            why = (f"A discontinuity in the {', '.join(disc)} above this pressure "
+                   f"(a direction reversal that should not occur above the "
+                   f"saturation pressure) marks a prior non-equilibrium "
+                   f"extension; only the trusted locus below it is retained.")
+        else:
+            why = ("PVTO and PVTG no longer share saturated pressures above this "
+                   "point, marking a prior non-equilibrium extension; only the "
+                   "trusted locus below it is retained.")
         cl.add(
             action=f"Discarded {n_o_drop} PVTO and {n_g_drop} PVTG saturated "
                    f"row(s) above {fr.cut:g} psia, keeping a "
                    f"{len(trusted['p'])}-node trusted locus.",
-            reason="PVTO and PVTG saturated pressures diverge above this point, "
-                   "which indicates a prior non-equilibrium extension; only the "
-                   "trusted shared locus is retained.",
+            reason=why,
         )
     if fr.repairs:
         for pres, key, old, new in fr.repairs:
@@ -231,22 +240,28 @@ def build(table: BlackOilTable, config: Config,
                            so_interp=so_interp, sg_interp=sg_interp)
     if ext["folded_at"] is not None:
         fold = ext["folded_at"]
+        prop = ext.get("fold_property") or "Bo or Bg"
         diag.add(Anomaly(
             kind="eos_fold",
             location=f"extension node {fold} (P~{p_ext[fold]:.0f} psia)",
             severity=Severity.WARN,
-            message="Bo or Bg reversed during EOS extension - a near-critical "
-                    "fold the smooth extrapolation cannot represent. The "
-                    "extension is truncated below the fold.",
-            suggested_fix="Lower the convergence pressure to extend smoothly to "
-                          "the critical region without folding.",
+            message=(f"The extension toward the convergence pressure became "
+                     f"non-physical near the critical point at ~{p_ext[fold]:.0f} "
+                     f"psia: {prop} reversed direction (it should change "
+                     f"monotonically toward the critical point). The K-value "
+                     f"extrapolation cannot capture the sharp near-critical "
+                     f"curvature, so the extension is stopped just below it."),
+            suggested_fix="Lower the convergence pressure so the extension reaches "
+                          "the critical region without reversing.",
         ))
         if config.truncate_at_fold:
             cl.add(
-                action=f"Truncated the EOS extension at ~{p_ext[fold]:.0f} psia.",
-                reason="Bo or Bg reversed (a near-critical fold) that the smooth "
-                       "K-value extrapolation cannot represent; nodes beyond the "
-                       "fold are dropped.",
+                action=f"Stopped the extension at ~{p_ext[fold]:.0f} psia "
+                       f"(dropped the nodes above it).",
+                reason=f"Above this pressure the {prop} reversed direction, which "
+                       f"is non-physical approaching the critical point; the "
+                       f"K-value extrapolation cannot represent the sharp "
+                       f"near-critical curvature there.",
             )
             for k in ("p", "rs", "rv", "bo", "bg", "uo", "ug"):
                 ext[k] = ext[k][:fold]

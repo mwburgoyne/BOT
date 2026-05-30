@@ -91,18 +91,23 @@ def extend_saturated(p_ext: np.ndarray, ko_ext: np.ndarray, kg_ext: np.ndarray,
 
     bo, bg = np.array(bo), np.array(bg)
     folded_at: Optional[int] = None
+    fold_property: Optional[str] = None
     if detect_fold and len(bo) > 2:
-        # above the anchor Bo should keep rising and Bg keep falling
+        # toward the critical point Bo should keep rising and Bg keep falling
         bo_rev = np.where(np.diff(bo) < 0)[0]
         bg_rev = np.where(np.diff(bg) > 0)[0]
-        revs = [r for r in (bo_rev.tolist() + bg_rev.tolist())]
-        if revs:
-            folded_at = int(min(revs)) + 1
+        candidates = []
+        if bo_rev.size:
+            candidates.append((int(bo_rev[0]) + 1, "oil FVF Bo"))
+        if bg_rev.size:
+            candidates.append((int(bg_rev[0]) + 1, "gas FVF Bg"))
+        if candidates:
+            folded_at, fold_property = min(candidates, key=lambda c: c[0])
 
     return {
         "p": p_ext, "rs": rs, "rv": rv, "bo": bo, "bg": bg,
         "uo": np.array(uo), "ug": np.array(ug),
         "deno": np.array(deno), "deng": np.array(deng),
         "ko": ko_ext, "kg": kg_ext,
-        "folded_at": folded_at,
+        "folded_at": folded_at, "fold_property": fold_property,
     }

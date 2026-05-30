@@ -57,20 +57,48 @@ def _shared_locus(table: BlackOilTable, rtol: float = 1e-4) -> Dict[str, np.ndar
     return {k: arr[:, i] for i, k in enumerate(keys)}
 
 
+def discontinuous_above_cut(table: BlackOilTable, cut: float,
+                            rtol: float = 1e-4):
+    """Names of saturated properties that reverse direction above ``cut``.
+
+    Above the saturation pressure the saturated properties should stay monotone
+    (Rs, Bo, Rv rising; Bg falling). A wrong-direction step above ``cut`` marks
+    the discontinuity left by a prior non-equilibrium extension.
+    """
+    props = [("solution gas-oil ratio Rs", table.pvto.p, table.pvto.rs, 1),
+             ("oil FVF Bo", table.pvto.p, table.pvto.bo, 1),
+             ("vaporized oil-gas ratio Rv", table.pvtg.p, table.pvtg.rv, 1),
+             ("gas FVF Bg", table.pvtg.p, table.pvtg.bg, -1)]
+    out = []
+    for name, p, y, sgn in props:
+        p, y = np.asarray(p), np.asarray(y)
+        ya = y[p > cut * (1 + rtol)]
+        if len(ya) >= 2 and np.any(np.diff(ya) * sgn < 0):
+            out.append(name)
+    return out
+
+
 def detect_pressure_misalignment(table: BlackOilTable, diag: Diagnostics,
                                  rtol: float = 1e-4) -> float:
-    """Flag saturated rows above the last shared PVTO/PVTG pressure."""
+    """Flag the untrusted extension above the last consistent saturated point."""
     cut = shared_saturated_pressure(table, rtol)
     n_o = int(np.sum(table.pvto.p > cut * (1 + rtol)))
     n_g = int(np.sum(table.pvtg.p > cut * (1 + rtol)))
     if n_o or n_g:
+        disc = discontinuous_above_cut(table, cut, rtol)
+        if disc:
+            why = (f"A discontinuity in the {', '.join(disc)} above {cut:g} psia "
+                   f"(a direction reversal that should not occur above the "
+                   f"saturation pressure) marks a prior non-equilibrium "
+                   f"extension.")
+        else:
+            why = (f"PVTO and PVTG no longer share saturated pressures above "
+                   f"{cut:g} psia, marking a prior non-equilibrium extension.")
         diag.add(Anomaly(
             kind="pressure_misalignment",
             location=f"P > {cut:g} psia",
             severity=Severity.WARN,
-            message=(f"PVTO and PVTG saturated pressures diverge above "
-                     f"{cut:g} psia ({n_o} oil, {n_g} gas rows). This usually "
-                     f"marks a prior non-equilibrium extension."),
+            message=f"{why} {n_o} oil and {n_g} gas rows lie above it.",
             suggested_fix=f"Discard saturated rows above {cut:g} psia "
                           f"(set Config.saturated_cut={cut:g}).",
         ))

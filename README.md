@@ -138,8 +138,8 @@ Extension:
 | `n_extension_nodes` | `15` | saturated extension nodes to Pk |
 | `n_undersaturated_nodes` | `10` | undersaturated rows per branch |
 | `output_pressures` | `()` | resample the saturated locus onto these pressures |
-| `extrapolate_shift_trend` | `True` | extend volume shifts along their trend, not flat |
-| `shift_trend_points` | `3` | last-N points that set the trend slope |
+| `extrapolate_shift_trend` | `False` | hold the volume shift flat above the table; True projects the fitted per-node trend |
+| `shift_trend_points` | `3` | last-N points that set the trend slope when the trend option is on |
 | `oil_shift_abscissa` | `"log"` | transform that linearises the oil-shift trend (`log`/`recip`/`linear`/`sqrt`) |
 | `gas_shift_abscissa` | `"linear"` | transform that linearises the gas-shift trend |
 | `truncate_at_fold` | `True` | stop the extension at a near-critical Bo/Bg fold |
@@ -203,11 +203,16 @@ notebook produced wrong-direction low-pressure points (it varied the shift along
 the saturated-locus trend at fixed composition) and removed them by hand; the
 anchoring removes the cause.
 
-Shift extrapolation above the table. The volume shifts follow the local trend of
-the last few points, anchored so the extrapolation passes through the last valid
-point exactly with no offset at the join, rather than freezing flat. The trend is
-fitted in the abscissa that linearises it: log p (or 1/p) for the oil shift, plain
-p for the gas shift.
+Volume shift above the table. The Peneloux volume translation is
+pressure-independent by definition, so the shift is held flat (at the last fitted
+value) for the extension. The per-node shift varies with pressure in the fitted
+region only because the two-component EOS absorbs model error against real data,
+and projecting that trend forward lowers the oil molar volume and suppresses the
+near-critical rise in Bo, which then turns over. Holding the shift flat gives the
+correct character: Bo rises with an increasing slope toward the critical point.
+The trend option (`extrapolate_shift_trend = True`) remains available; it is
+fitted in the abscissa that linearises it, log p for the oil shift and plain p for
+the gas shift, and anchored so it passes through the last fitted point exactly.
 
 Shift smoothing. `shift_smoothness` adds a roughness penalty to the shift trends.
 Zero reproduces the exact per-node fit. A small value gives smooth, monotone shift

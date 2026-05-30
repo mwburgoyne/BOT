@@ -170,8 +170,13 @@ class Config:
     output_pressures: tuple = ()    # if set, the output saturated locus is built
                                     # at exactly these pressures (resampled from
                                     # the interpolated + EOS-extended model)
-    extrapolate_shift_trend: bool = True  # extend volume shifts along their trend
-    shift_trend_points: int = 3           # last-N points defining the trend slope
+    extrapolate_shift_trend: bool = False  # hold the volume shift flat above the
+                                           # table (the Peneloux shift is
+                                           # pressure-independent); projecting the
+                                           # fitted per-node trend forward
+                                           # suppresses the near-critical Bo rise
+    shift_trend_points: int = 3            # last-N points for the trend slope when
+                                           # extrapolate_shift_trend is True
     oil_shift_abscissa: str = "log"       # transform linearising the oil shift trend
     gas_shift_abscissa: str = "linear"    # transform linearising the gas shift trend
     truncate_at_fold: bool = True         # stop the extension at a near-critical fold
