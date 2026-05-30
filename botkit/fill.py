@@ -17,61 +17,6 @@ from .model import SurfaceFluids
 from .viscosity import LBCParameters
 
 
-def enforce_oil_branch_monotonic(rows: np.ndarray, bo_anchor: float,
-                                 uo_anchor: float) -> np.ndarray:
-    """Make an undersaturated oil branch physically monotone from its anchor.
-
-    Above the bubble point the oil compresses: Bo must not exceed the saturated
-    value and must not increase with pressure, while uo must not fall below it
-    and must not decrease.  Rows are assumed ordered by increasing pressure.
-    """
-    if rows.shape[0] == 0:
-        return rows
-    rows = rows.copy()
-    bo = np.concatenate([[bo_anchor], rows[:, 1]])
-    rows[:, 1] = np.minimum.accumulate(bo)[1:]
-    uo = np.concatenate([[uo_anchor], rows[:, 2]])
-    rows[:, 2] = np.maximum.accumulate(uo)[1:]
-    return rows
-
-
-def oil_branch_compressibilities(rows: np.ndarray, bo_anchor: float,
-                                 uo_anchor: float, psat: float):
-    """Mean undersaturated oil compressibility and viscosity-pressure slope.
-
-    Returns (c_o, c_mu) with c_o = mean(-d ln Bo / dp) and
-    c_mu = mean(d ln uo / dp) over the branch (anchored at the saturated values),
-    or (None, None) for an empty branch.
-    """
-    if rows.shape[0] == 0:
-        return None, None
-    p = np.concatenate([[psat], rows[:, 0]])
-    bo = np.concatenate([[bo_anchor], rows[:, 1]])
-    uo = np.concatenate([[uo_anchor], rows[:, 2]])
-    c_o = float(np.mean(-np.diff(np.log(bo)) / np.diff(p)))
-    c_mu = float(np.mean(np.diff(np.log(uo)) / np.diff(p)))
-    return c_o, c_mu
-
-
-def fill_oil_branch_constant_c(psat: float, bo_sat: float, uo_sat: float,
-                               p_grid: np.ndarray, c_o: float,
-                               c_mu: float) -> np.ndarray:
-    """Undersaturated oil rows from a constant-compressibility reciprocal form.
-
-    Bo = Bo_b * exp(-c_o * (p - p_b)) and uo = uo_b * exp(c_mu * (p - p_b)),
-    anchored at the bubble point.  Monotone and physically positive by
-    construction; used to regenerate branches where the EOS is unreliable (the
-    low-pressure blind spot) instead of emitting non-physical EOS output.
-    """
-    rows = []
-    for p in p_grid:
-        if p <= psat:
-            continue
-        rows.append([p, bo_sat * np.exp(-c_o * (p - psat)),
-                     uo_sat * np.exp(c_mu * (p - psat))])
-    return np.array(rows) if rows else np.empty((0, 3))
-
-
 def undersaturated_pressures(min_psat: float, Pk: float, n: int) -> np.ndarray:
     """Pressure nodes above the bubble point on a square-root progression."""
     incr = ((Pk - 1) ** 0.5 - min_psat ** 0.5) / n
@@ -99,13 +44,21 @@ def fill_oil_branch(psat: float, rs: float, bo_sat: float, uo_sat: float,
     xo = s.Co / (rs * s.mult + s.Co)
     xg = 1.0 - xo
     mwo = s.oil_mw * xo + s.gas_mw * xg
+
+    # Anchor Bo and uo to the measured saturated values at the bubble point and
+    # let the EOS density and LBC viscosity supply only the pressure *ratio*.
+    # This makes the branch continuous with the saturated node and monotone by
+    # construction (rho rises -> Bo falls, uo rises), independent of any small
+    # EOS/LBC offset from the measured node - so no post-hoc clipping is needed.
+    rho_o_sat = mwo / molar_volume(psat, xo, xg, params, so_node, sg_node)
+    uo_lbc_sat = lbc.phase_viscosity(xo, xg, rho_o_sat)
     rows = [[psat, bo_sat, uo_sat]]
     for p in p_grid:
         if p <= psat:
             continue
         rho_o = mwo / molar_volume(p, xo, xg, params, so_node, sg_node)
-        bo = (s.st_oil_density + s.st_gas_density * rs * s.mult) / rho_o
-        uo = lbc.phase_viscosity(xo, xg, rho_o)
+        bo = bo_sat * rho_o_sat / rho_o
+        uo = uo_sat * lbc.phase_viscosity(xo, xg, rho_o) / uo_lbc_sat
         rows.append([p, bo, uo])
     return np.array(rows)
 

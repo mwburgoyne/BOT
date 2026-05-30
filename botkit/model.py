@@ -156,9 +156,10 @@ class Config:
     # QC / table-trimming
     saturated_cut = AUTO            # highest shared saturated pressure to keep
     enforce_monotonic_cgr: bool = True
-    enforce_undersaturated_monotonic: bool = True  # undersat oil Bo falls, uo rises
-    hybrid_undersaturated_oil: bool = True   # regenerate blind-spot oil branches
-    hybrid_co_factor: float = 3.0            # c_o > factor x median -> regenerate
+    co_trend_tol: float = 0.5       # flag undersat oil branches whose c_o departs
+                                    # from the smooth c_o(psat) trend by > this frac
+    manual_replace_pressures: tuple = ()  # pressures whose saturated node is
+                                          # replaced by interpolation (refit after)
 
     # extension
     convergence_pressure_Pk = AUTO  # Singh App. B analytical value if AUTO
@@ -166,6 +167,9 @@ class Config:
     first_extrap_node: int = -1     # index from the table end to anchor extrapolation
     n_extension_nodes: int = 15
     n_undersaturated_nodes: int = 10
+    output_pressures: tuple = ()    # if set, the output saturated locus is built
+                                    # at exactly these pressures (resampled from
+                                    # the interpolated + EOS-extended model)
     extrapolate_shift_trend: bool = True  # extend volume shifts along their trend
     shift_trend_points: int = 3           # last-N points defining the trend slope
     oil_shift_abscissa: str = "log"       # transform linearising the oil shift trend

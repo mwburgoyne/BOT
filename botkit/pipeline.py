@@ -21,15 +21,14 @@ import numpy as np
 from . import eos as _eos
 from . import viscosity as _visc
 from .extend import extend_saturated, extrapolate_kvalues
-from .fill import (enforce_oil_branch_monotonic, fill_gas_branch,
-                   fill_oil_branch, fill_oil_branch_constant_c,
-                   oil_branch_compressibilities, undersaturated_pressures,
+from .fill import (fill_gas_branch, fill_oil_branch, undersaturated_pressures,
                    undersaturated_rv_grid)
 from .interpolate import SaturatedInterpolator
 from .kvalues import convergence_pressure, kvalues, phase_properties
 from .model import (AUTO, Anomaly, BlackOilTable, ChangeLog, Config,
                     Diagnostics, PVTGTable, PVTOTable, Severity)
-from .qc import _shared_locus, detect_undersaturated_compressibility, run_qc
+from .qc import (_shared_locus, detect_undersaturated_compressibility,
+                 detect_undersaturated_compressibility_trend, loo_predict, run_qc)
 
 
 @dataclass
@@ -46,6 +45,7 @@ class FitResult:
     cut: float
     eos_pressure_error: float
     eos_trusted: bool
+    repairs: list = field(default_factory=list)
 
 
 @dataclass
@@ -82,6 +82,18 @@ def fit(table: BlackOilTable, config: Config, diag: Optional[Diagnostics] = None
     m = loc["p"] <= cut * 1.0001
     trusted = {k: v[m] for k, v in loc.items()}
 
+    # optional repair of user-named spurious saturated points: replace the node's
+    # values with the leave-one-out interpolation through its neighbours, then let
+    # the EOS refit to the corrected locus.
+    repairs = []
+    for pr in config.manual_replace_pressures:
+        j = int(np.argmin(np.abs(trusted["p"] - pr)))
+        for key in ("rs", "rv", "bo", "bg", "uo", "ug"):
+            old = float(trusted[key][j])
+            trusted[key][j] = loo_predict(trusted["p"], trusted[key], j)
+            repairs.append((float(trusted["p"][j]), key, old,
+                            float(trusted[key][j])))
+
     kv = kvalues(trusted["rs"], trusted["rv"], s)
     props = {
         "p": trusted["p"], "uo": trusted["uo"], "ug": trusted["ug"],
@@ -99,7 +111,20 @@ def fit(table: BlackOilTable, config: Config, diag: Optional[Diagnostics] = None
                   convergence_pressure(trusted["p"], kv["ko"], kv["kg"],
                                        n_nodes=config.convergence_pressure_nodes))
 
-    T = config.reservoir_temperature if config.reservoir_temperature else 680.0
+    if config.reservoir_temperature:
+        T = config.reservoir_temperature
+    else:
+        T = 680.0  # deg R (220 F) default when neither supplied nor regressed
+        if not config.regress_temperature:
+            diag.add(Anomaly(
+                kind="assumed_temperature",
+                location="EOS regression",
+                severity=Severity.WARN,
+                message=f"No reservoir temperature supplied; assuming {T:.0f} deg R "
+                        f"({T - 460:.0f} deg F). Set Config.reservoir_temperature, "
+                        f"or regress_temperature=True, for a fluid-specific value.",
+                suggested_fix="Provide Config.reservoir_temperature (deg R).",
+            ))
     params0 = _eos.initial_parameters(s, T)
     params, _, _ = _eos.tune_global(props, params0,
                                     regress_temperature=config.regress_temperature)
@@ -136,7 +161,8 @@ def fit(table: BlackOilTable, config: Config, diag: Optional[Diagnostics] = None
 
     return FitResult(trusted=trusted, props=props, params=params, lbc=lbc,
                      so_tab=so_tab, sg_tab=sg_tab, Pk=Pk, cut=cut,
-                     eos_pressure_error=err, eos_trusted=eos_trusted)
+                     eos_pressure_error=err, eos_trusted=eos_trusted,
+                     repairs=repairs)
 
 
 def build(table: BlackOilTable, config: Config,
@@ -164,6 +190,14 @@ def build(table: BlackOilTable, config: Config,
                    "which indicates a prior non-equilibrium extension; only the "
                    "trusted shared locus is retained.",
         )
+    if fr.repairs:
+        for pres, key, old, new in fr.repairs:
+            cl.add(
+                action=f"Replaced saturated {key.upper()} at {pres:g} psia: "
+                       f"{old:.5g} -> {new:.5g}.",
+                reason="User-specified point removed and replaced by interpolation "
+                       "through its neighbours; EOS refit to the corrected locus.",
+            )
     if not fr.eos_trusted:
         cl.add(
             action="EOS-based regeneration flagged for fallback.",
@@ -239,26 +273,62 @@ def build(table: BlackOilTable, config: Config,
     sat_uo = np.concatenate([trusted["uo"][keep], ext["uo"]])
     sat_ug = np.concatenate([trusted["ug"][keep], ext["ug"]])
 
+    # optional resample of the saturated locus onto a user-specified pressure
+    # grid (e.g. to refine the rapidly-changing low-pressure region). The grid is
+    # served by the honour-the-data interpolator over the assembled trusted+EOS
+    # locus; requested pressures outside that range are dropped and flagged.
+    if config.output_pressures:
+        full = SaturatedInterpolator(sat_p, sat_rs, sat_rv, sat_bo, sat_bg,
+                                     sat_uo, sat_ug, s)
+        grid = np.array(sorted(set(float(p) for p in config.output_pressures)))
+        inside = (grid >= sat_p.min() - 1e-6) & (grid <= sat_p.max() + 1e-6)
+        if not np.all(inside):
+            dropped = ", ".join(f"{p:g}" for p in grid[~inside])
+            diag.add(Anomaly(
+                kind="output_pressure_out_of_range",
+                location=f"P = {dropped} psia",
+                severity=Severity.WARN,
+                message=(f"Requested output pressure(s) outside the model range "
+                         f"[{sat_p.min():g}, {sat_p.max():g}] psia were dropped."),
+                suggested_fix="Raise the convergence pressure to extend the range.",
+            ))
+        grid = grid[inside]
+        ev = full.evaluate(grid)
+        sat_p = grid
+        sat_rs, sat_rv = ev["rs"], ev["rv"]
+        sat_bo, sat_bg = ev["bo"], ev["bg"]
+        sat_uo, sat_ug = ev["uo"], ev["ug"]
+        cl.add(
+            action=f"Resampled the saturated locus onto {len(grid)} "
+                   f"user-specified pressure(s).",
+            reason="Output pressures requested; properties taken by "
+                   "composition-everywhere interpolation of the trusted + "
+                   "EOS-extended locus.",
+        )
+
     # optional simulator-compliance fix: truncate non-monotonic low-P Rv
+    cgr_idx = 0  # number of low-pressure nodes flattened to the retrograde minimum
     if config.enforce_monotonic_cgr and "cgr_floor" in result.suggestions:
         floor = result.suggestions["cgr_floor"]
-        i_min = int(np.argmin(sat_rv))
-        if i_min > 0:
+        cgr_idx = int(np.argmin(sat_rv))
+        if cgr_idx > 0:
             cl.add(
-                action=f"Flattened saturated Rv at {i_min} node(s) below "
-                       f"{sat_p[i_min]:g} psia to the retrograde minimum "
+                action=f"Flattened saturated Rv at {cgr_idx} node(s) below "
+                       f"{sat_p[cgr_idx]:g} psia to the retrograde minimum "
                        f"{floor:g} and removed their undersaturated gas lines.",
                 reason="The low-pressure rise in Rv is physically real but most "
                        "commercial simulators require monotonic saturated Rv "
                        "(enforce_monotonic_cgr).",
             )
-        sat_rv[:i_min] = floor
+        sat_rv[:cgr_idx] = floor
 
     # fill undersaturated branches. Each branch is at fixed composition, so its
-    # volume shift is held constant at the node's value (interpolated within the
-    # table, trend-extrapolated above it) - this gives a physical undersaturated
-    # compressibility rather than the spurious shape the saturated-locus shift
-    # trend would inject at constant composition.
+    # volume shift is held at the node's value, and Bo / uo are anchored to the
+    # measured saturated values with the EOS density and LBC viscosity supplying
+    # only the pressure ratio. The branches are therefore continuous with the
+    # saturated node and monotone by construction - no post-hoc clipping or
+    # blind-spot regeneration is needed; the output-side QC below still flags any
+    # residual non-physical branch for review.
     p_grid = undersaturated_pressures(float(sat_p.min()), fr.Pk,
                                       config.n_undersaturated_nodes)
     rv_grid = undersaturated_rv_grid(float(sat_rv.min()), float(sat_rv.max()),
@@ -266,96 +336,29 @@ def build(table: BlackOilTable, config: Config,
     so_node = np.asarray(so_interp(sat_p), dtype=float)
     sg_node = np.asarray(sg_interp(sat_p), dtype=float)
 
-    # first pass: EOS oil branches and their (c_o, c_mu). Branches whose
-    # compressibility is non-physically steep (the low-pressure blind spot) are
-    # flagged against the table median; the reliable branches then define a
-    # c_o(p) / c_mu(p) trend that supplies a locally interpolated compressibility
-    # for each flagged node rather than a single table-wide average.
-    oil_eos, co_list, cmu_list = [], [], []
-    for i in range(len(sat_p)):
-        rows = fill_oil_branch(sat_p[i], sat_rs[i], sat_bo[i], sat_uo[i],
-                               fr.params, fr.lbc, s, p_grid,
-                               so_node[i], sg_node[i])[1:]  # drop saturated dup
-        oil_eos.append(rows)
-        c_o, c_mu = oil_branch_compressibilities(rows, sat_bo[i], sat_uo[i], sat_p[i])
-        co_list.append(c_o)
-        cmu_list.append(c_mu)
-
-    valid = [(sat_p[i], co_list[i], cmu_list[i]) for i in range(len(sat_p))
-             if co_list[i] is not None and co_list[i] > 0]
-    median_co = float(np.median([c for _, c, _ in valid])) if valid else 0.0
-    factor = config.hybrid_co_factor
-    reliable = [(p, c, cm) for (p, c, cm) in valid if c <= factor * median_co]
-    rel_p = np.array([p for p, _, _ in reliable])
-    rel_co = np.array([c for _, c, _ in reliable])
-    rel_cmu = np.array([cm for _, _, cm in reliable])
-
     o_usat, g_usat = [], []
-    regenerated, enforced = [], 0
     for i in range(len(sat_p)):
-        oil_rows = oil_eos[i]
-        c_o = co_list[i]
-        is_blind_spot = (config.hybrid_undersaturated_oil and oil_rows.shape[0] > 0
-                         and c_o is not None and median_co > 0
-                         and c_o > factor * median_co and rel_p.size >= 1)
-        if is_blind_spot:
-            # compressibility interpolated from the surrounding reliable nodes
-            # (np.interp clamps to the nearest reliable node beyond their range)
-            c_o_use = float(np.interp(sat_p[i], rel_p, rel_co))
-            c_mu_use = float(np.interp(sat_p[i], rel_p, rel_cmu))
-            oil_rows = fill_oil_branch_constant_c(sat_p[i], sat_bo[i], sat_uo[i],
-                                                  p_grid, c_o_use, c_mu_use)
-            diag.add(Anomaly(
-                kind="undersaturated_regenerated",
-                location=f"undersaturated oil branch at Psat = {sat_p[i]:g} psia",
-                severity=Severity.INFO,
-                message="EOS undersaturated oil compressibility was non-physically "
-                        "steep (low-pressure blind spot); regenerated by the "
-                        "reciprocal-family law with c_o interpolated from the "
-                        f"surrounding reliable nodes (c_o={c_o_use:.2e}/psi).",
-                suggested_fix="",
-            ))
-            regenerated.append(sat_p[i])
-        if config.enforce_undersaturated_monotonic and oil_rows.shape[0] > 0:
-            fixed = enforce_oil_branch_monotonic(oil_rows, sat_bo[i], sat_uo[i])
-            if not np.array_equal(fixed, oil_rows):
-                enforced += 1
-            oil_rows = fixed
-        o_usat.append(oil_rows)
-        if config.enforce_monotonic_cgr and i < int(np.argmin(sat_rv)):
-            g_usat.append(np.empty((0, 3)))  # truncated nodes carry no usat gas
+        o_usat.append(fill_oil_branch(
+            sat_p[i], sat_rs[i], sat_bo[i], sat_uo[i], fr.params, fr.lbc, s,
+            p_grid, so_node[i], sg_node[i])[1:])  # drop saturated dup
+        if config.enforce_monotonic_cgr and i < cgr_idx:
+            g_usat.append(np.empty((0, 3)))  # flattened nodes carry no usat gas
         else:
             g_usat.append(fill_gas_branch(
                 sat_p[i], sat_rv[i], sat_bg[i], sat_ug[i], fr.params, fr.lbc, s,
                 rv_grid, so_node[i], sg_node[i])[1:])
-
-    if regenerated:
-        nodes = ", ".join(f"{p:g}" for p in regenerated)
-        cl.add(
-            action=f"Regenerated {len(regenerated)} undersaturated oil branch(es) "
-                   f"(Psat = {nodes} psia) by the reciprocal-family law.",
-            reason="The two-component EOS is unreliable in the low-pressure blind "
-                   "spot and produced a non-physically steep compressibility; the "
-                   "branches were rebuilt with c_o interpolated from the "
-                   "surrounding reliable nodes.",
-        )
-    if enforced:
-        cl.add(
-            action=f"Enforced monotonicity on {enforced} undersaturated oil "
-                   f"branch(es) (Bo non-increasing, uo non-decreasing).",
-            reason="Above the bubble point oil compresses; any residual "
-                   "wrong-direction step is clipped for a deck-legal, physical "
-                   "branch (enforce_undersaturated_monotonic).",
-        )
 
     pvto = PVTOTable(rs=sat_rs, p=sat_p, bo=sat_bo, uo=sat_uo, usat=o_usat)
     pvtg = PVTGTable(p=sat_p, rv=sat_rv, bg=sat_bg, ug=sat_ug, usat=g_usat)
     result.extended = BlackOilTable(pvto=pvto, pvtg=pvtg, surface=s)
 
     # output-side QC: flag any generated undersaturated rows that came out
-    # non-physical (e.g. the low-pressure oil branch in the EOS blind spot) so
-    # they are surfaced for review rather than silently emitted.
+    # non-physical (wrong-direction compressibility, or a branch whose c_o
+    # sticks out from the smooth trend) so they are surfaced for review rather
+    # than silently emitted or auto-altered.
     detect_undersaturated_compressibility(result.extended, diag)
+    detect_undersaturated_compressibility_trend(result.extended, diag,
+                                                tol=config.co_trend_tol)
 
     # honour-the-data interpolator over the trusted locus (for lookup/QC/plots)
     result.info["interpolator"] = SaturatedInterpolator(

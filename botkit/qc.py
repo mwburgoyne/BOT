@@ -279,6 +279,62 @@ def detect_undersat_viscosity_loglog(table: BlackOilTable, diag: Diagnostics,
             ))
 
 
+def loo_predict(p: np.ndarray, y: np.ndarray, idx: int) -> float:
+    """PCHIP value at node ``idx`` from the other nodes (that node excluded)."""
+    from scipy.interpolate import PchipInterpolator
+    p = np.asarray(p, dtype=float)
+    y = np.asarray(y, dtype=float)
+    order = np.argsort(p)
+    p, y = p[order], y[order]
+    pos = int(np.where(order == idx)[0][0])
+    xs = np.delete(p, pos)
+    ys = np.delete(y, pos)
+    return float(PchipInterpolator(xs, ys)(p[pos]))
+
+
+def detect_undersaturated_compressibility_trend(table: BlackOilTable,
+                                                diag: Diagnostics,
+                                                tol: float = 0.5) -> None:
+    """Flag undersaturated oil branches whose c_o sticks out from the trend.
+
+    The undersaturated oil compressibility c_o = mean(-d ln Bo / dp) should vary
+    smoothly and monotonically with the bubble-point pressure (lighter oils at
+    higher Psat are more compressible).  A node whose c_o departs from a smooth
+    fit through the others by more than ``tol`` (fractional) is flagged for
+    review - a trend-based check rather than a fixed multiple of the median.
+    The branch is flagged, not modified.
+    """
+    o = table.pvto
+    ps, cos, idxs = [], [], []
+    for i, rows in enumerate(o.usat):
+        if rows.shape[0] < 2:
+            continue
+        p = np.concatenate([[o.p[i]], rows[:, 0]])
+        bo = np.concatenate([[o.bo[i]], rows[:, 1]])
+        order = np.argsort(p)
+        p, bo = p[order], bo[order]
+        if np.any(bo <= 0):
+            continue
+        cos.append(float(np.mean(-np.diff(np.log(bo)) / np.diff(p))))
+        ps.append(o.p[i])
+        idxs.append(i)
+    if len(cos) < 4:
+        return
+    ps, cos = np.array(ps), np.array(cos)
+    fit = np.polyval(np.polyfit(ps, cos, 2), ps)  # smooth c_o(Psat) trend
+    resid = np.abs(cos - fit) / np.maximum(np.abs(fit), 1e-12)
+    for k in np.where(resid > tol)[0]:
+        diag.add(Anomaly(
+            kind="undersaturated_co_outlier",
+            location=f"undersaturated oil branch at Psat = {ps[k]:g} psia",
+            severity=Severity.WARN,
+            message=(f"Undersaturated oil compressibility {cos[k]:.2e}/psi departs "
+                     f"{resid[k]:.0%} from the smooth c_o(Psat) trend through the "
+                     f"other branches."),
+            suggested_fix="Review this branch; its compressibility sticks out.",
+        ))
+
+
 def detect_cgr_reversal(table: BlackOilTable, diag: Diagnostics,
                         cut: Optional[float] = None,
                         enforce_monotonic: bool = True) -> Optional[float]:
