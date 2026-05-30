@@ -6,16 +6,20 @@ the input data points; the EOS is reserved for creating genuinely new data
 
 Following the consolidated interpolation findings of the companion lookup work,
 the solution-ratio quantities are interpolated as *compositions* -- the gas
-mole fraction in the liquid (x_g) and in the vapour (y_g) -- in log(p), the
+mole fraction in the liquid (x_g) and in the vapour (y_g) -- the
 "composition-everywhere" method, and Rs / Rv are formed from the interpolated
 compositions at the query.  Interpolating the bounded, regular compositions
 avoids the K = y_g / x_g coordinate singularity as x_g -> 0 (the Rs = 0 edge)
 that interpolating K-values or Rs / Rv directly would suffer.
 
-Volumetrics use reciprocal families that interpolate cleanly and stay positive:
-oil 1/Bo and oil mobility 1/(Bo*uo) in log(p); gas 1/Bg and 1/(Bg*ug) in plain
-pressure.  PCHIP is shape-preserving, so every input node is reproduced exactly
-and monotone data stays monotone.
+Each quantity uses the per-quantity abscissa fixed by the companion study's
+Whitson-corpus leave-one-out validation: x_g in p^1.5 (Rs ~ p^1.5 empirically,
+which rebuilds the Rs -> 0 bottom segment to single-digit % error versus
+100-200% in log p), y_g in log p.  Volumetrics use reciprocal families that
+interpolate cleanly and stay positive: oil 1/Bo in plain p with oil mobility
+1/(Bo*uo) in log p (uo recovered as the log-p mobility / the plain-p Bo); gas
+1/Bg and gas mobility 1/(Bg*ug) in plain p.  PCHIP is shape-preserving, so every
+input node is reproduced exactly and monotone data stays monotone.
 """
 
 from __future__ import annotations
@@ -61,15 +65,16 @@ class SaturatedInterpolator:
         self.surface = surface
         self.pmin, self.pmax = float(p[0]), float(p[-1])
         lp = np.log(p)
+        p15 = p ** 1.5
 
         kv = kvalues(rs, rv, surface)
-        # compositions: gas mole fraction in liquid (xg) and vapour (yg)
-        self._xg = PchipInterpolator(lp, kv["xg"], extrapolate=True)
+        # compositions: gas mole fraction in liquid (xg) in p^1.5, vapour (yg) in log p
+        self._xg = PchipInterpolator(p15, kv["xg"], extrapolate=True)
         self._yg = PchipInterpolator(lp, kv["yg"], extrapolate=True)
-        # oil volumetrics in log p (reciprocal families)
-        self._inv_bo = PchipInterpolator(lp, 1.0 / bo, extrapolate=True)
+        # oil volumetrics: 1/Bo in plain p, oil mobility 1/(Bo*uo) in log p
+        self._inv_bo = PchipInterpolator(p, 1.0 / bo, extrapolate=True)
         self._inv_bo_uo = PchipInterpolator(lp, 1.0 / (bo * uo), extrapolate=True)
-        # gas volumetrics in plain p (reciprocal families)
+        # gas volumetrics in plain p (1/Bg and gas mobility 1/(Bg*ug))
         self._inv_bg = PchipInterpolator(p, 1.0 / bg, extrapolate=True)
         self._inv_bg_ug = PchipInterpolator(p, 1.0 / (bg * ug), extrapolate=True)
 
@@ -77,9 +82,10 @@ class SaturatedInterpolator:
         """Saturated properties at pressure(s) ``p`` from the interpolants."""
         p = np.asarray(p, dtype=float)
         lp = np.log(p)
-        xg = self._xg(lp)
+        p15 = p ** 1.5
+        xg = self._xg(p15)
         yg = self._yg(lp)
-        bo = 1.0 / self._inv_bo(lp)
+        bo = 1.0 / self._inv_bo(p)
         uo = 1.0 / (self._inv_bo_uo(lp) * bo)
         bg = 1.0 / self._inv_bg(p)
         ug = 1.0 / (self._inv_bg_ug(p) * bg)
