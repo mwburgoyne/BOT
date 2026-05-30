@@ -235,9 +235,14 @@ def build(table: BlackOilTable, config: Config,
     p_ext, ko_ext, kg_ext = extrapolate_kvalues(
         psat, props["ko"], props["kg"], fr.Pk, config.n_extension_nodes,
         anchor=config.first_extrap_node)
+    # measured viscosity at the extrapolation anchor, to keep the regenerated
+    # viscosity continuous with the table across the join
+    a = config.first_extrap_node
     ext = extend_saturated(p_ext, ko_ext, kg_ext, fr.params, fr.lbc, s,
                            max_psat=float(psat.max()),
-                           so_interp=so_interp, sg_interp=sg_interp)
+                           so_interp=so_interp, sg_interp=sg_interp,
+                           anchor_uo=float(trusted["uo"][a]),
+                           anchor_ug=float(trusted["ug"][a]))
     if ext["folded_at"] is not None:
         fold = ext["folded_at"]
         prop = ext.get("fold_property") or "Bo or Bg"

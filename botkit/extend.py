@@ -57,7 +57,9 @@ def extend_saturated(p_ext: np.ndarray, ko_ext: np.ndarray, kg_ext: np.ndarray,
                      surface: SurfaceFluids, max_psat: float,
                      so_interp: Callable[[float], float],
                      sg_interp: Callable[[float], float],
-                     detect_fold: bool = True) -> Dict[str, np.ndarray]:
+                     detect_fold: bool = True,
+                     anchor_uo: Optional[float] = None,
+                     anchor_ug: Optional[float] = None) -> Dict[str, np.ndarray]:
     """Regenerate saturated properties along the extension from EOS + LBC.
 
     Volume shifts are taken from the per-node fits, interpolated and clamped at
@@ -88,6 +90,16 @@ def extend_saturated(p_ext: np.ndarray, ko_ext: np.ndarray, kg_ext: np.ndarray,
         bg.append((s.st_gas_density + s.st_oil_density * rv[i] / s.mult) / rho_g * s.mult)
         deng.append(rho_g)
         ug.append(lbc.phase_viscosity(yo[i], yg[i], rho_g))
+
+    uo, ug = np.array(uo), np.array(ug)
+    # Anchor the regenerated viscosity to the measured value at the join: the
+    # global LBC fit does not reproduce the measured saturated viscosity at the
+    # last trusted node exactly, which would leave a kink at the first extension
+    # point. Scale the LBC output so the anchor point matches, removing the kink.
+    if anchor_uo and uo[0] > 0:
+        uo = uo * (anchor_uo / uo[0])
+    if anchor_ug and ug[0] > 0:
+        ug = ug * (anchor_ug / ug[0])
 
     bo, bg = np.array(bo), np.array(bg)
     folded_at: Optional[int] = None
