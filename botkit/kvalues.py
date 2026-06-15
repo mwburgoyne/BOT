@@ -30,7 +30,11 @@ def kvalues(rs: np.ndarray, rv: np.ndarray,
     Co, mult, Lo, Lg = surface.Co, surface.mult, surface.Lo, surface.Lg
 
     ko = (1.0 + rs * mult / Co) / (1.0 + 1.0 / (Co * rv / mult))
-    kg = (1.0 + Co / (rs * mult)) / (1.0 + Co * (rv / mult))
+    with np.errstate(divide="ignore"):
+        # at the Rs = 0 vertex (psc) kg -> inf is the correct limit; the
+        # composition basis (xo/xg/yo/yg) carries the bottom edge, so the pole
+        # is harmless here.
+        kg = (1.0 + Co / (rs * mult)) / (1.0 + Co * (rv / mult))
     xo = Co / (rs * mult + Co)
     xg = 1.0 - xo
     yo = Lo * rv / (Lg + Lo * rv)

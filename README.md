@@ -24,10 +24,12 @@ handling of the undersaturated branches and the near-critical region.
 4. Computes the convergence pressure analytically (Singh App. B) on the trimmed
    locus.
 5. Tunes a two-component PR79 + Peneloux EOS and LBC viscosity to the data.
-6. Extends the saturated tables to the convergence pressure, stopping at a
-   near-critical fold.
-7. Fills the undersaturated oil and gas branches.
-8. Writes an Eclipse PVTO/PVTG deck with the change summary in the header.
+6. Extends the saturated tables up to the convergence pressure (K to K=1 at Pk),
+   stopping at a near-critical fold.
+7. Extends the saturated tables down to psc (K-value origin poles + binary VLE
+   bijection; Bo, Bg and viscosity anchored at psc).
+8. Fills the undersaturated oil and gas branches.
+9. Writes an Eclipse PVTO/PVTG deck with the change summary in the header.
 
 ## Quick start
 
@@ -128,7 +130,7 @@ QC and trimming:
 | `co_trend_tol` | `0.5` | flag an undersaturated branch whose c_o departs this fraction from the trend |
 | `manual_replace_pressures` | `()` | pressures whose saturated node is replaced by interpolation |
 
-Extension:
+Extension (high side, above the table toward Pk):
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -136,6 +138,7 @@ Extension:
 | `convergence_pressure_nodes` | `2` | top-N nodes for the App. B fit (2 is the canonical last slope) |
 | `first_extrap_node` | `-1` | table row from the end that anchors the extrapolation |
 | `n_extension_nodes` | `15` | saturated extension nodes to Pk |
+| `kvalue_extension` | `"convergence"` | high-side K law: `"convergence"` extends K to K=1 at Pk (default); `"constant"` freezes K (classic CKE) |
 | `n_undersaturated_nodes` | `10` | undersaturated rows per branch |
 | `output_pressures` | `()` | resample the saturated locus onto these pressures |
 | `extrapolate_shift_trend` | `False` | hold the volume shift flat above the table; True projects the fitted per-node trend |
@@ -143,6 +146,23 @@ Extension:
 | `oil_shift_abscissa` | `"log"` | transform that linearises the oil-shift trend (`log`/`recip`/`linear`/`sqrt`) |
 | `gas_shift_abscissa` | `"linear"` | transform that linearises the gas-shift trend |
 | `truncate_at_fold` | `True` | stop the extension at a near-critical Bo/Bg fold |
+
+Extension (low side, below the table down to psc):
+
+| Option | Default | Meaning |
+|---|---|---|
+| `extend_to_psc` | `True` | continue the saturated locus below the lowest measured pressure down to psc |
+| `psc` | `14.696` | standard-condition pressure, psia |
+| `n_low_extension_nodes` | `8` | nodes inserted between psc and the lowest measured pressure |
+| `kg_low_pole_exp` | `2.0` | gas K-value origin-pole exponent, K_g = K_g(p1)*(p1/p)^exp |
+| `ko_low_pole_exp` | `0.5` | oil K-value origin-pole exponent, K_o = K_o(p1)*(p1/p)^exp |
+| `bo_psc_anchor` | `1.0` | Bo at psc (small thermal expansion ignored) |
+
+Master revert:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `whitson_mode` | `False` | True restores the classic conservative behaviour: constant-K high side (CKE) and no low-side extension to psc |
 
 EOS:
 
@@ -176,6 +196,33 @@ nodes.
 Convergence pressure. Pk comes from the App. B log K against log p extrapolation
 through the top two nodes (the last slope), computed on the trusted locus after
 the bad tail is removed. It can be overridden.
+
+High-side K law. Above the table the K-values are extended to K=1 at Pk by default
+(`kvalue_extension = "convergence"`): a log-log quadratic that honours the slope at
+the anchor and bends to the K=1 endpoint. A top-node leave-one-out over Milan's
+seven-fluid Whitson corpus showed this matches the best purely local log-log fit
+(median K_g error 0.0 percent, K_o 0.3 percent) while enforcing the physical K=1 at
+Pk that a local slope misses; freezing K (the classic constant-K extension, CKE) is
+the worst, 1.2 and 3.1 percent at the very first step and compounding upward.
+`kvalue_extension = "constant"` selects CKE, and `whitson_mode = True` forces it.
+
+Low-side extension to psc. Simulators drive the flowing pressure toward psc in
+unconstrained history matching, so by default (`extend_to_psc = True`) the saturated
+locus is continued below the lowest measured pressure down to psc. Rs and Rv come
+from the K-value origin poles validated in the companion `bopvt-lookup` study on the
+Whitson corpus: below the lowest Rs>0 node p1 the gas pseudocomponent follows
+K_g = K_g(p1)*(p1/p)^2 (Curtis's K_g.p^2) and the oil pseudocomponent
+K_o = K_o(p1)*(p1/p)^0.5, both finite poles at the origin with no clamp, and Rs, Rv
+are recovered from the pair by the binary VLE bijection (the two-component
+compositions are fixed by the K-values alone, Gibbs F = C - 2 = 0). Rs goes to zero
+at psc by the stock-tank convention. Bo is anchored to 1.0 at psc (small thermal
+expansion ignored) and filled by 1/Bo interpolation. Bg is anchored at psc to the
+Z=1 ideal-gas value when a reservoir temperature is supplied, otherwise the gas Z is
+effectively frozen and Bg(psc) is taken by the isothermal pressure ratio
+Bg(p1)*(p1/psc), then filled by 1/Bg interpolation. Viscosities continue the
+mobilities 1/(Bo*uo) and 1/(Bg*ug) in their established coordinates, divided by the
+anchored B, and are flagged as extrapolated; LBC is not used here because its
+low-pressure VcVis fit is the very thing the build drops as ill-conditioned.
 
 EOS regression. The global PR fit uses per-node oil and gas molar-volume
 residuals. The large low-pressure gas molar volumes cannot be matched by a +/-0.2
@@ -234,12 +281,15 @@ point, where the K-value extrapolation can fold (Bo or Bg reversing). The fold i
 detected and the extension truncated below it.
 
 Monotonic Rv. The retrograde low-pressure rise in saturated Rv is real, but most
-simulators reject it. With `enforce_monotonic_cgr` on, the low-pressure saturated
-Rv is flattened to its retrograde minimum and the undersaturated gas lines on
-those nodes are dropped. With it off, the reversal is kept and reported as a note.
-The K-values and compositions are intermediate and not written to the deck, and
-the measured Bg and ug are honoured, so nothing is recomputed from the flattened
-Rv.
+simulators reject it. With `enforce_monotonic_cgr` on (the default), the
+low-pressure saturated Rv is flattened to its retrograde minimum and the
+undersaturated gas lines on those nodes are dropped; this covers both the original
+in-table reversal and the steep retrograde rise the low-side extension produces
+toward psc (the K-value bijection gives a finite, rising r_s there). With it off,
+the full non-monotonic profile is kept as the more physically realistic behaviour
+and reported as a note. The K-values and compositions are intermediate and not
+written to the deck, and the measured Bg and ug are honoured, so nothing is
+recomputed from the flattened Rv.
 
 No interactive prompts. Every decision that was an `input()` in the notebook is a
 `Config` field with an auto-derived default, so a run is reproducible.
@@ -262,7 +312,8 @@ botkit/
   viscosity.py    Lohrenz-Bray-Clark viscosity
   interpolate.py  composition-everywhere PCHIP layer
   qc.py           QC detectors; leave-one-out node prediction
-  extend.py       K-value extrapolation, EOS regeneration, fold detection
+  extend.py       high-side K-value extrapolation to Pk, EOS regeneration, fold detection
+  extend_low.py   low-side extension to psc (K-value origin poles + bijection, anchors)
   fill.py         undersaturated branches, anchored to the measured node
   report.py       markdown and JSON diagnostics; change summary; plots
   pipeline.py     orchestration: QC, fit, extend, fill, assemble, write

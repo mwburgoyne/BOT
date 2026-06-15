@@ -161,12 +161,28 @@ class Config:
     manual_replace_pressures: tuple = ()  # pressures whose saturated node is
                                           # replaced by interpolation (refit after)
 
-    # extension
+    # extension (high side, above the table toward Pk)
     convergence_pressure_Pk = AUTO  # Singh App. B analytical value if AUTO
     convergence_pressure_nodes: int = 2  # top-N nodes for App. B (2 = canonical)
     first_extrap_node: int = -1     # index from the table end to anchor extrapolation
     n_extension_nodes: int = 15
+    kvalue_extension: str = "convergence"  # high-side K law: "convergence" extends
+                                           # K to K=1 at Pk (default, top-node-LOO
+                                           # best); "constant" freezes K (CKE).
+                                           # whitson_mode forces "constant".
     n_undersaturated_nodes: int = 10
+
+    # extension (low side, below the table down to psc)
+    extend_to_psc: bool = True      # continue the saturated locus below p_min to psc
+    psc: float = 14.696             # standard-condition pressure, psia
+    n_low_extension_nodes: int = 8  # nodes inserted between psc and p_min
+    kg_low_pole_exp: float = 2.0    # K_g = K_g(p1)*(p1/p)^exp (Curtis K_g.p^2)
+    ko_low_pole_exp: float = 0.5    # K_o = K_o(p1)*(p1/p)^exp (bopvt n_o=0.5)
+    bo_psc_anchor: float = 1.0      # Bo at psc (small thermal expansion ignored)
+
+    # master revert: classic conservative behaviour. True -> constant-K high side
+    # (CKE) and no low-side extension to psc.
+    whitson_mode: bool = False
     output_pressures: tuple = ()    # if set, the output saturated locus is built
                                     # at exactly these pressures (resampled from
                                     # the interpolated + EOS-extended model)

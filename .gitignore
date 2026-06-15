@@ -5,3 +5,6 @@ __pycache__/
 .ipynb_checkpoints/
 EXTENDED_PVT.inc
 HANDOFF.md
+# VBA reference workbooks (validation only - never publish)
+*.xlsm
+*v7*

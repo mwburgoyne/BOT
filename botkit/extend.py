@@ -30,21 +30,36 @@ def quad_extrap(slope: float, x1: float, y1: float, x2: float, y2: float,
 
 
 def extrapolate_kvalues(p: np.ndarray, ko: np.ndarray, kg: np.ndarray,
-                        Pk: float, n_ext: int, anchor: int = -1
+                        Pk: float, n_ext: int, anchor: int = -1,
+                        mode: str = "convergence"
                         ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Extrapolate ko, kg from the table top to K=1 at Pk (log-log quadratic).
+    """Extrapolate ko, kg from the table top toward higher pressure.
 
     ``anchor`` selects the table row used as the extrapolation start (-1 = last
-    row).  Returns extension pressures and the matching ko, kg arrays, beginning
-    at the anchor pressure.
+    row).  ``mode`` chooses the high-side law:
+
+    * ``"convergence"`` (default) -- a log-log quadratic that honours the slope
+      at the anchor and bends to K = 1 at the convergence pressure Pk
+      (Singh & Whitson, SPE 109596).  A top-node leave-one-out over the Whitson
+      corpus showed this matches the best local log-log fit while enforcing the
+      physical K = 1 endpoint a purely local slope misses.
+    * ``"constant"`` -- the classic constant-K extension (CKE): K is frozen at
+      the anchor, so no new gas dissolves and the composition is held above the
+      table.  This is the conservative "Whitson mode" revert.
+
+    Returns extension pressures and the matching ko, kg arrays, beginning at the
+    anchor pressure.
     """
     lp = np.log10
     x1 = p[anchor]
     ko_a, kg_a = ko[anchor], kg[anchor]
+    p_ext = np.linspace(x1, Pk - 1.0, n_ext)
+
+    if mode == "constant":
+        return p_ext, np.full(n_ext, ko_a), np.full(n_ext, kg_a)
+
     ko_slope = lp(ko_a / ko[anchor - 1]) / lp(x1 / p[anchor - 1])
     kg_slope = lp(kg_a / kg[anchor - 1]) / lp(x1 / p[anchor - 1])
-
-    p_ext = np.linspace(x1, Pk - 1.0, n_ext)
     ko_ext = np.array([10 ** quad_extrap(ko_slope, lp(x1), lp(ko_a), lp(Pk), 0.0, lp(pe))
                        for pe in p_ext])
     kg_ext = np.array([10 ** quad_extrap(kg_slope, lp(x1), lp(kg_a), lp(Pk), 0.0, lp(pe))

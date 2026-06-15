@@ -21,6 +21,7 @@ import numpy as np
 from . import eos as _eos
 from . import viscosity as _visc
 from .extend import extend_saturated, extrapolate_kvalues
+from .extend_low import extend_below_pmin
 from .fill import (fill_gas_branch, fill_oil_branch, undersaturated_pressures,
                    undersaturated_rv_grid)
 from .interpolate import SaturatedInterpolator
@@ -252,10 +253,12 @@ def build(table: BlackOilTable, config: Config,
         def sg_interp(p):
             return np.interp(p, psat, fr.sg_tab)
 
-    # extrapolate K-values and regenerate saturated properties to Pk
+    # extrapolate K-values and regenerate saturated properties to Pk. Whitson
+    # mode forces the classic constant-K (CKE) high-side law.
+    k_mode = "constant" if config.whitson_mode else config.kvalue_extension
     p_ext, ko_ext, kg_ext = extrapolate_kvalues(
         psat, props["ko"], props["kg"], fr.Pk, config.n_extension_nodes,
-        anchor=config.first_extrap_node)
+        anchor=config.first_extrap_node, mode=k_mode)
     ext = extend_saturated(p_ext, ko_ext, kg_ext, fr.params, fr.lbc, s,
                            max_psat=float(psat.max()),
                            so_interp=so_interp, sg_interp=sg_interp)
@@ -303,12 +306,15 @@ def build(table: BlackOilTable, config: Config,
 
     pk_source = ("Singh App. B analytical estimate"
                  if config.convergence_pressure_Pk is AUTO else "user-specified value")
+    k_law = ("the K-values held constant (classic constant-K extension)"
+             if k_mode == "constant"
+             else "the K-values extended to K=1 at Pk")
     cl.add(
         action=f"Extended the saturated tables to a convergence pressure "
                f"Pk = {fr.Pk:g} psia ({len(ext['p'])} extension node(s)).",
-        reason=f"Convergence pressure taken from the {pk_source}; saturated "
-               f"properties above the table are regenerated from the tuned "
-               f"PR79 + Peneloux EOS and LBC viscosity.",
+        reason=f"Convergence pressure taken from the {pk_source}; with {k_law}, "
+               f"saturated properties above the table are regenerated from the "
+               f"tuned PR79 + Peneloux EOS and LBC viscosity.",
     )
 
     # assemble the extended saturated locus: trusted rows up to the anchor,
@@ -322,6 +328,48 @@ def build(table: BlackOilTable, config: Config,
     sat_bg = np.concatenate([trusted["bg"][keep], ext["bg"]])
     sat_uo = np.concatenate([trusted["uo"][keep], ext["uo"]])
     sat_ug = np.concatenate([trusted["ug"][keep], ext["ug"]])
+
+    # low-side extension: continue the saturated locus below the lowest measured
+    # pressure down to psc (Rs/Rv from the K-value origin poles + binary VLE
+    # bijection; Bo anchored to 1.0; Bg anchored at psc by Z=1 or pressure ratio;
+    # viscosities by mobility continuation). Off in Whitson mode.
+    if config.extend_to_psc and not config.whitson_mode:
+        T_for_bg = (config.reservoir_temperature if config.reservoir_temperature
+                    else (fr.params.T if config.regress_temperature else None))
+        low = extend_below_pmin(
+            sat_p, sat_rs, sat_rv, sat_bo, sat_bg, sat_uo, sat_ug, s,
+            psc=config.psc, n_nodes=config.n_low_extension_nodes,
+            kg_exp=config.kg_low_pole_exp, ko_exp=config.ko_low_pole_exp,
+            bo_psc=config.bo_psc_anchor, reservoir_temperature=T_for_bg)
+        if low is not None:
+            sat_p = np.concatenate([low["p"], sat_p])
+            sat_rs = np.concatenate([low["rs"], sat_rs])
+            sat_rv = np.concatenate([low["rv"], sat_rv])
+            sat_bo = np.concatenate([low["bo"], sat_bo])
+            sat_bg = np.concatenate([low["bg"], sat_bg])
+            sat_uo = np.concatenate([low["uo"], sat_uo])
+            sat_ug = np.concatenate([low["ug"], sat_ug])
+            cl.add(
+                action=f"Extended the saturated tables below {low['p1']:g} psia "
+                       f"down to psc = {config.psc:g} psia "
+                       f"({len(low['p'])} node(s)).",
+                reason=f"Simulators drive flowing pressure toward psc, so the "
+                       f"table is continued there: Rs/Rv from the K-value origin "
+                       f"poles (K_g.(p1/p)^{config.kg_low_pole_exp:g}, "
+                       f"K_o.(p1/p)^{config.ko_low_pole_exp:g}) via the binary VLE "
+                       f"bijection with Rs=0 at psc; Bo anchored to "
+                       f"{config.bo_psc_anchor:g}; Bg by {low['bg_basis']}; "
+                       f"viscosities by mobility continuation.",
+            )
+            for f in low["flags"]:
+                diag.add(Anomaly(
+                    kind="low_side_extension",
+                    location=f"below {low['p1']:g} psia",
+                    severity=Severity.WARN,
+                    message=f"Low-side extension toward psc: {f}.",
+                    suggested_fix="Review the bottom saturated rows or set "
+                                  "extend_to_psc=False.",
+                ))
 
     # optional resample of the saturated locus onto a user-specified pressure
     # grid (e.g. to refine the rapidly-changing low-pressure region). The grid is
