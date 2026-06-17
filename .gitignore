@@ -8,3 +8,13 @@ HANDOFF.md
 # VBA reference workbooks (validation only - never publish)
 *.xlsm
 *v7*
+
+# Windows mark-of-the-web alternate-data-stream artifacts
+*Zone.Identifier
+
+# Proprietary Permian fluid model + third-party correspondence — keep LOCAL,
+# never publish (mwburgoyne/BOT is a public repo).
+phz/band-validation/eos.inc
+phz/band-validation/compositions.inc
+phz/band-validation/*.Out
+phz/band-validation/*.msg
