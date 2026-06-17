@@ -19,3 +19,4 @@ phz/band-validation/eos.inc
 phz/band-validation/compositions.inc
 phz/band-validation/*.Out
 phz/band-validation/*.msg
+docs/ARCHIVE/
