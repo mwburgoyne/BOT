@@ -5,7 +5,8 @@ Simulators drive the bottom-hole flowing pressure toward psc (~14.7 psia) in
 unconstrained history matching, so a Black-Oil Table must return sensible
 Rs, Rv, Bo, Bg and viscosities there.  Many tables stop well short.  This module
 continues the table down to psc using the K-value machinery the companion
-``bopvt-lookup`` study validated on Milan's Whitson corpus (leave-one-out):
+``bopvt-lookup`` study validated on a seven-fluid Whitson-school corpus
+(leave-one-out):
 
 * **K-values** are extrapolated below the lowest Rs>0 node p1 with origin poles
   (finite at psc, no clamp): the gas pseudocomponent K_g = K_g(p1)*(p1/p)^2

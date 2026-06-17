@@ -220,8 +220,8 @@ bad tail is removed, and either can be overridden via `convergence_pressure_Pk`.
 
 High-side K law. Above the table the K-values are extended to K=1 at Pk by default
 (`kvalue_extension = "convergence"`): a log-log quadratic that honours the slope at
-the anchor and bends to the K=1 endpoint. A top-node leave-one-out over Milan's
-seven-fluid Whitson corpus showed this matches the best purely local log-log fit
+the anchor and bends to the K=1 endpoint. A top-node leave-one-out over a
+seven-fluid Whitson-school corpus showed this matches the best purely local log-log fit
 (median K_g error 0.0 percent, K_o 0.3 percent) while enforcing the physical K=1 at
 Pk that a local slope misses; freezing K (the classic constant-K extension, CKE) is
 the worst, 1.2 and 3.1 percent at the very first step and compounding upward.
