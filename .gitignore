@@ -5,6 +5,7 @@ __pycache__/
 .ipynb_checkpoints/
 EXTENDED_PVT.inc
 HANDOFF.md
+PK_CROSSING_LEARNINGS.md
 # VBA reference workbooks (validation only - never publish)
 *.xlsm
 *v7*
