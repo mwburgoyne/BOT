@@ -146,16 +146,26 @@ def convergence_pressure_crossing(p: np.ndarray, mwo: np.ndarray, mwg: np.ndarra
     than two K-roots averaged -- where the oil and gas roots blow up away from
     critical, the crossing stays finite.
 
-    Each branch is fitted linearly in ``p`` through the top ``n_nodes`` saturated
-    nodes (the validated probe used four) and solved for the crossing.  The fit is
-    valid only where the geometry is physical -- oil MW falling, gas MW rising, and
-    the crossing above the top node.  ``nan`` is returned otherwise so the caller
-    can fall back to :func:`convergence_pressure`.
+    Mechanically this is a *local* extrapolation, not a closed-form p_c: the two
+    phase average molecular weights ``mwo(p)`` and ``mwg(p)`` are each fitted as a
+    straight line in pressure through the top ``n_nodes`` trusted saturated nodes
+    (four in the validated probe), and Pk is the single pressure where the two
+    lines meet (mwo = mwg, i.e. x_g = y_g).  The molar-volume argument above
+    justifies *which coordinate* to extrapolate -- the phase average MW; the
+    linear-in-pressure form is the empirical step, a short reach from the top of
+    the trusted locus and the single-coordinate analogue of Singh App. B's linear
+    log-K-vs-log-p reach (one composition coordinate, so one bounded root instead
+    of two).  The fit is used only where the geometry is physical -- oil MW
+    falling, gas MW rising, and the crossing above the top node; ``nan`` is
+    returned otherwise so the caller can fall back to
+    :func:`convergence_pressure`.
 
-    Note: this locates the two-component criticality consistently, but which root
-    is closest to the true p_c is not yet validated against an EOS critical point
-    (the PhazeComp band run is built to answer that); it is the consistency-cleaner
-    estimate, not a proven-more-accurate one.
+    Validation: on a proprietary near-critical fluid this crossing matched an EOS
+    convergence pressure (located independently from the collapse of the
+    saturation-pressure K-values toward unity) to within a few percent, where the
+    Singh App. B two-root average was off by tens of percent.  It is the
+    consistency-cleaner, single-bounded-root estimate; broader cross-fluid
+    validation is still pending.
     """
     p = np.asarray(p, dtype=float)
     mwo = np.asarray(mwo, dtype=float)

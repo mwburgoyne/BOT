@@ -25,8 +25,8 @@ handling of the undersaturated branches and the near-critical region.
 1. Reads PVTO/PVTG from Excel or an Eclipse deck.
 2. Runs QC detectors and reports anomalies with suggested fixes.
 3. Trims the untrusted tail above the last shared PVTO/PVTG pressure.
-4. Computes the convergence pressure analytically (Singh App. B) on the trimmed
-   locus.
+4. Computes the convergence pressure analytically on the trimmed locus (the
+   oil/gas average-MW crossing by default; Singh App. B as the fallback).
 5. Tunes a two-component PR79 + Peneloux EOS and LBC viscosity to the data.
 6. Extends the saturated tables up to the convergence pressure (K to K=1 at Pk),
    stopping at a near-critical fold.
@@ -50,7 +50,7 @@ table = read_excel("data/PVTO&PVTG_example.xlsx", surface=surface)
 diag, suggestions = run_qc(table)
 print(diagnostics_to_markdown(diag, suggestions))
 
-# Build the extended table. Pk defaults to the Singh App. B fit.
+# Build the extended table. Pk defaults to the average-MW crossing (see below).
 cfg = Config()
 cfg.reservoir_temperature = 680.0   # deg R; omit to get a flagged 680 R default
 cfg.auto_apply_fixes = True
@@ -138,8 +138,9 @@ Extension (high side, above the table toward Pk):
 
 | Option | Default | Meaning |
 |---|---|---|
-| `convergence_pressure_Pk` | `AUTO` | `AUTO` is the Singh App. B value |
-| `convergence_pressure_nodes` | `2` | top-N nodes for the App. B fit (2 is the canonical last slope) |
+| `convergence_pressure_Pk` | `AUTO` | `AUTO` computes Pk from `pk_method` |
+| `pk_method` | `"crossing"` | `"crossing"` = oil/gas average-MW crossing (single bounded root); `"singh"` = SPE 109596 App. B two-K-root average (also the auto-fallback) |
+| `convergence_pressure_nodes` | `2` | top-N nodes for the Singh App. B fit (2 is the canonical last slope) |
 | `first_extrap_node` | `-1` | table row from the end that anchors the extrapolation |
 | `n_extension_nodes` | `15` | saturated extension nodes to Pk |
 | `kvalue_extension` | `"convergence"` | high-side K law: `"convergence"` extends K to K=1 at Pk (default); `"constant"` freezes K (classic CKE) |
@@ -197,9 +198,25 @@ everywhere. K = y_g/x_g has a singularity as x_g goes to zero (the Rs = 0 edge),
 and interpolating Rs/Rv directly inherits that. PCHIP is monotone and exact at the
 nodes.
 
-Convergence pressure. Pk comes from the App. B log K against log p extrapolation
-through the top two nodes (the last slope), computed on the trusted locus after
-the bad tail is removed. It can be overridden.
+Convergence pressure. By default (`pk_method = "crossing"`) Pk is the oil/gas
+average-molecular-weight crossing. Both reservoir phases are mixtures of the same
+surface oil and gas, so each phase's average MW is its position on the
+two-component composition axis; toward the critical point the oil-phase MW falls
+and the gas-phase MW rises, and where they meet the phases are identical
+(x_g = y_g) — that pressure is Pk. Mechanically the two phase average MWs are each
+extrapolated as a straight line in pressure through the top few trusted nodes, and
+Pk is the single pressure where the lines cross — one bounded root, from the table
+and the surface MWs alone, with no EOS. This is the molar-volume (M/γ) coordinate
+of Whitson's note: average MW is the axis because molar volume is what ideal
+(Amagat) mixing preserves; the linear-in-pressure reach is the empirical step, the
+single-coordinate analogue of Singh's linear log-K-against-log-p extrapolation.
+
+Setting `pk_method = "singh"` instead uses the SPE 109596 App. B method: log K
+against log p extrapolated to K = 1 through the top two nodes (the last slope),
+done separately for the oil and gas pseudocomponents and averaged — two roots that
+diverge for lean fluids. It is also the automatic fallback when the crossing
+geometry is degenerate. Either method is computed on the trusted locus after the
+bad tail is removed, and either can be overridden via `convergence_pressure_Pk`.
 
 High-side K law. Above the table the K-values are extended to K=1 at Pk by default
 (`kvalue_extension = "convergence"`): a log-log quadratic that honours the slope at
@@ -311,7 +328,7 @@ header so the reasoning travels with the deck.
 botkit/
   model.py        data structures, Config, Diagnostics, ChangeLog, constants
   io.py           Excel and Eclipse PVTO/PVTG read and write
-  kvalues.py      Singh App. A transforms; App. B convergence pressure
+  kvalues.py      modified-black-oil K-value transforms (App. A); convergence pressure (average-MW crossing or Singh App. B)
   eos.py          PR79 plus Peneloux; regression; fallback metrics; trend extrapolation
   viscosity.py    Lohrenz-Bray-Clark viscosity
   interpolate.py  composition-everywhere PCHIP layer
