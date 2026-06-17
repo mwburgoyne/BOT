@@ -26,7 +26,7 @@ continues the table down to psc using the K-value machinery the companion
   low-pressure critical-density fit is the very thing the build drops as
   ill-conditioned.
 
-Reference: Singh & Whitson, SPE 109596 (2007), App. A; companion ``bopvt-lookup``
+Reference: Singh, Fevang & Whitson, SPE 109596 (2007), App. A; companion ``bopvt-lookup``
 findings of 6-7 Jun 2026 (bottom K_g origin pole; below-p_min r_s rule).
 """
 

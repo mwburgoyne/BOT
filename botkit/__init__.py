@@ -1,8 +1,11 @@
 """botkit -- Black-Oil Table quality-control and extension toolkit.
 
-Implements the Black-Oil Table extension method of Singh & Whitson,
-SPE 109596 (2007), with automated quality-control detectors, analytical
-convergence-pressure estimation, and an EOS fallback gate.
+The underlying two-pseudocomponent (modified-black-oil) K-value formulation is
+Whitson & Torp (JPT 1983, SPE 10067) and Coats (SPE 50990).  The consistent
+table modification this toolkit automates -- negative-compressibility QC,
+extension to the convergence pressure, near-critical consistency -- is Singh,
+Fevang & Whitson, SPE 109596 (2007).  Added here: automated quality-control
+detectors, analytical convergence-pressure estimation, and an EOS fallback gate.
 """
 
 from .model import (

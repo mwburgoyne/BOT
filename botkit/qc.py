@@ -12,7 +12,7 @@ plot-eyeballing and interactive point-removal of the original notebook:
   * low-pressure CGR (Rv) reversal that Eclipse rejects.
 
 The derivative / saturated-compressibility check follows the black-oil
-consistency relations of Singh & Whitson, SPE 109596 (2007); negative saturated
+consistency relations of Singh, Fevang & Whitson, SPE 109596 (2007); negative saturated
 compressibility as a marker of a missing or corrupt node is a standard
 Whitson-school diagnostic.
 """

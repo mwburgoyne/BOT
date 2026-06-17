@@ -508,7 +508,9 @@ def write_deck(result: PipelineResult, path: Optional[str] = None,
     if result.extended is None:
         raise ValueError("no extended table to write; run build() first")
     header = (f"{title}\n"
-              f"Method: Singh & Whitson, SPE 109596 (2007)\n"
+              f"Method: modified black-oil K-values (Whitson & Torp, SPE 10067, "
+              f"1983; Coats, SPE 50990); consistent table modification per "
+              f"Singh, Fevang & Whitson, SPE 109596 (2007)\n"
               f"Pk = {result.info.get('Pk', '?'):g} psia; "
               f"trusted cut = {result.info.get('cut', '?'):g} psia\n\n"
               f"{changes_to_text(result.changes)}")

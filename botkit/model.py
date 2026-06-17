@@ -3,7 +3,7 @@
 A Black-Oil Table is represented as a saturated PVTO branch (oil) and a
 saturated PVTG branch (gas), each optionally carrying undersaturated rows per
 saturated node.  Surface-fluid properties and the two-pseudocomponent mixing
-constants follow Singh & Whitson, SPE 109596 (2007).
+constants follow Singh, Fevang & Whitson, SPE 109596 (2007).
 """
 
 from __future__ import annotations
@@ -43,8 +43,9 @@ class SurfaceFluids:
     """Stock-tank fluid densities and derived mixing constants.
 
     The mixing constants (Lo, Lg, Mult, Co) convert between the engineering
-    black-oil ratios (Rs, Rv) and the two-pseudocomponent mole fractions used
-    by the K-value formulation of Singh & Whitson, SPE 109596 (2007), App. A.
+    black-oil ratios (Rs, Rv) and the two-pseudocomponent mole fractions of the
+    modified-black-oil K-value formulation (Whitson & Torp, SPE 10067, 1983;
+    restated in Singh, Fevang & Whitson, SPE 109596, App. A).
     """
 
     st_oil_density: float      # stock-tank oil density, lbm/ft^3

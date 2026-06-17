@@ -7,9 +7,13 @@ pressure. It is a tested Python re-implementation of the original
 automated detectors that flag problems for review, and a change log records every
 fix and the reason for it.
 
-The method follows Singh and Whitson, SPE 109596 (2007). The table is recast as a
-two-pseudocomponent (surface-oil plus surface-gas) K-value system, the K-values
-are extended to the convergence pressure, and a two-component Peng-Robinson EOS
+The table is recast as a two-pseudocomponent (surface-oil plus surface-gas)
+K-value system — the modified-black-oil formulation of Whitson and Torp (JPT
+1983, SPE 10067) and Coats (SPE 50990) — and the consistent table modification
+(negative-compressibility QC, extension to the convergence pressure,
+near-critical consistency) follows Singh, Fevang and Whitson, SPE 109596 (2007).
+The K-values are extended to the convergence pressure, and a two-component
+Peng-Robinson EOS
 with Peneloux volume shifts and Lohrenz-Bray-Clark viscosity regenerates the
 volumetric and viscosity properties. Around that core the toolkit adds automated
 QC, an analytical convergence pressure, an EOS regression with a fallback gate, a
@@ -326,8 +330,11 @@ Run the tests with `pytest`.
 
 ## Attribution
 
-Implemented methods are credited to their publications in the code: Singh and
-Whitson, SPE 109596 (2007); Peng and Robinson (1976/1978); Peneloux, Rauzy and
-Freze (1982); Lohrenz, Bray and Clark (1964); and the Standing-era oil-property
-correlations. The composition-everywhere interpolation basis and the per-phase
-abscissa choices follow the companion Black-Oil PVT lookup work.
+Implemented methods are credited to their publications in the code: the
+two-pseudocomponent (modified-black-oil) K-value formulation of Whitson and Torp
+(JPT 1983, SPE 10067) and Coats (SPE 50990); the consistent table modification
+and convergence-pressure extension of Singh, Fevang and Whitson, SPE 109596
+(2007); Peng and Robinson (1976/1978); Peneloux, Rauzy and Freze (1982);
+Lohrenz, Bray and Clark (1964); and the Standing-era oil-property correlations.
+The composition-everywhere interpolation basis and the per-phase abscissa choices
+follow the companion Black-Oil PVT lookup work.

@@ -11,7 +11,7 @@ References:
     high-acentric-factor alpha modification.
   * Peneloux, A., Rauzy, E. & Freze, R. (1982), consistent volume translation.
   * Critical-property correlations for the surface pseudocomponents follow the
-    forms used in Singh & Whitson, SPE 109596 (2007).
+    forms used in Singh, Fevang & Whitson, SPE 109596 (2007).
 """
 
 from __future__ import annotations

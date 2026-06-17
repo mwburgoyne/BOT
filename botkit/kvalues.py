@@ -1,11 +1,13 @@
 """Two-pseudocomponent K-value formulation and convergence pressure.
 
-Implements the surface-oil / surface-gas K-value relations and the
-convergence-pressure estimate of Singh & Whitson, SPE 109596 (2007),
-Appendices A and B.  The black-oil ratios (Rs, Rv) are mapped to component
-mole fractions and equilibrium ratios (ko, kg); the inverse recovers (Rs, Rv)
-from a pair of K-values.  Convergence pressure is found by extrapolating
-log K versus log p to K = 1 (App. B).
+The surface-oil / surface-gas K-value relations are the modified-black-oil
+formulation of Whitson & Torp, JPT 1983 (SPE 10067) -- mapping the black-oil
+ratios (Rs, Rv) to two-pseudocomponent mole fractions and equilibrium ratios
+(ko, kg) -- with the two-component construction of Coats (SPE 50990).  The
+black-oil ratios are mapped to mole fractions and K-values; the inverse recovers
+(Rs, Rv) from a pair of K-values.  Singh, Fevang & Whitson, SPE 109596 (2007),
+restate these transforms (App. A) and add the consistent convergence-pressure
+estimate used here: extrapolating log K versus log p to K = 1 (App. B).
 """
 
 from __future__ import annotations
@@ -22,8 +24,9 @@ def kvalues(rs: np.ndarray, rv: np.ndarray,
     """K-values and component mole fractions from (Rs, Rv).
 
     Returns ko, kg (oil/gas pseudocomponent equilibrium ratios) and the liquid
-    and vapour mole fractions xo, xg, yo, yg.  Singh & Whitson, SPE 109596,
-    App. A.
+    and vapour mole fractions xo, xg, yo, yg.  Modified-black-oil transforms of
+    Whitson & Torp (JPT 1983, SPE 10067); restated in Singh, Fevang & Whitson,
+    SPE 109596, App. A.
     """
     rs = np.asarray(rs, dtype=float)
     rv = np.asarray(rv, dtype=float)
@@ -46,7 +49,7 @@ def rs_rv_from_kvalues(ko: np.ndarray, kg: np.ndarray,
                        surface: SurfaceFluids) -> Tuple[np.ndarray, np.ndarray]:
     """Recover (Rs, Rv) from a pair of K-values (inverse of :func:`kvalues`).
 
-    Singh & Whitson, SPE 109596, App. A.
+    Singh, Fevang & Whitson, SPE 109596, App. A.
     """
     ko = np.asarray(ko, dtype=float)
     kg = np.asarray(kg, dtype=float)
@@ -61,7 +64,7 @@ def phase_properties(table: BlackOilTable) -> Dict[str, np.ndarray]:
 
     Combines the K-value mole fractions with the table's Bo/Bg to give phase
     molecular weights, mass densities, and molar volumes used by the EOS
-    regression.  Singh & Whitson, SPE 109596, App. A.
+    regression.  Singh, Fevang & Whitson, SPE 109596, App. A.
     """
     s = table.surface
     o, g = table.pvto, table.pvtg
@@ -90,7 +93,7 @@ def convergence_pressure(p: np.ndarray, ko: np.ndarray, kg: np.ndarray,
 
     Linear fit of log10(K) against log10(p) through the top ``n_nodes`` saturated
     nodes, solved for K = 1 (log K = 0), for both the oil and gas pseudocomponents;
-    the two estimates are averaged.  Singh & Whitson, SPE 109596, App. B.  The
+    the two estimates are averaged.  Singh, Fevang & Whitson, SPE 109596, App. B.  The
     canonical method uses the top *two* nodes (the last log-K slope), which is the
     default; using more nodes is a least-squares smoothing of that slope.  This
     must be computed on the trusted locus only, i.e. after the misaligned tail has
@@ -139,9 +142,9 @@ def convergence_pressure_crossing(p: np.ndarray, mwo: np.ndarray, mwg: np.ndarra
     This is the molar-volume (M/gamma) coordinate of Whitson's note: molar volume
     is the one quantity ideal (Amagat) mixing preserves, so a fluid and all its
     splits ride one line indexed by average MW.  It reaches the same target as
-    Singh & Whitson (SPE 109596, App. B) but in one bounded root rather than two
-    K-roots averaged -- where Singh's oil and gas roots blow up away from critical,
-    the crossing stays finite.
+    Singh, Fevang & Whitson (SPE 109596, App. B) but in one bounded root rather
+    than two K-roots averaged -- where the oil and gas roots blow up away from
+    critical, the crossing stays finite.
 
     Each branch is fitted linearly in ``p`` through the top ``n_nodes`` saturated
     nodes (the validated probe used four) and solved for the crossing.  The fit is

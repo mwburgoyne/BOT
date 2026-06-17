@@ -5,7 +5,7 @@ K-values are extrapolated in log-log space to K = 1 at the convergence pressure
 properties (Rs, Rv, Bo, Bg, viscosities) are regenerated from the tuned EOS and
 LBC viscosity at each extension pressure.  A fold check stops the extension if
 Bo or Bg reverses direction, which marks a near-critical region the smooth
-extrapolation cannot represent.  Method: Singh & Whitson, SPE 109596 (2007).
+extrapolation cannot represent.  Method: Singh, Fevang & Whitson, SPE 109596 (2007).
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def extrapolate_kvalues(p: np.ndarray, ko: np.ndarray, kg: np.ndarray,
 
     * ``"convergence"`` (default) -- a log-log quadratic that honours the slope
       at the anchor and bends to K = 1 at the convergence pressure Pk
-      (Singh & Whitson, SPE 109596).  A top-node leave-one-out over the Whitson
+      (Singh, Fevang & Whitson, SPE 109596).  A top-node leave-one-out over the Whitson
       corpus showed this matches the best local log-log fit while enforcing the
       physical K = 1 endpoint a purely local slope misses.
     * ``"constant"`` -- the classic constant-K extension (CKE): K is frozen at

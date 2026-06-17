@@ -3,7 +3,7 @@
 For oil, pressure rises above the bubble point at constant Rs; for gas, the
 vapourized ratio Rv falls below its saturated value at constant pressure.  Each
 undersaturated property is regenerated from the tuned EOS and LBC viscosity.
-Method: Singh & Whitson, SPE 109596 (2007).
+Method: Singh, Fevang & Whitson, SPE 109596 (2007).
 """
 
 from __future__ import annotations
