@@ -25,7 +25,8 @@ from .extend_low import extend_below_pmin
 from .fill import (fill_gas_branch, fill_oil_branch, undersaturated_pressures,
                    undersaturated_rv_grid)
 from .interpolate import SaturatedInterpolator
-from .kvalues import convergence_pressure, kvalues, phase_properties
+from .kvalues import (convergence_pressure, convergence_pressure_crossing,
+                      kvalues, phase_properties)
 from .model import (AUTO, Anomaly, BlackOilTable, ChangeLog, Config,
                     Diagnostics, PVTGTable, PVTOTable, Severity)
 from .qc import (_shared_locus, detect_undersaturated_compressibility,
@@ -110,10 +111,30 @@ def fit(table: BlackOilTable, config: Config, diag: Optional[Diagnostics] = None
     props["vo"] = mwo / props["deno"]
     props["vg"] = mwg / props["deng"]
 
-    # Singh App. B convergence pressure on the trusted (trimmed) locus only
-    Pk = _resolve(config.convergence_pressure_Pk,
-                  convergence_pressure(trusted["p"], kv["ko"], kv["kg"],
-                                       n_nodes=config.convergence_pressure_nodes))
+    # Convergence pressure on the trusted (trimmed) locus only. The default
+    # "crossing" method locates the single Pk where the oil/gas average MWs meet
+    # (two-component criticality); it falls back to the Singh App. B two-K-root
+    # average when the crossing geometry is degenerate, which is also the explicit
+    # "singh" choice.
+    pk_singh = convergence_pressure(trusted["p"], kv["ko"], kv["kg"],
+                                    n_nodes=config.convergence_pressure_nodes)
+    pk_auto = pk_singh
+    if config.pk_method == "crossing":
+        pk_cross = convergence_pressure_crossing(trusted["p"], mwo, mwg)
+        if np.isfinite(pk_cross):
+            pk_auto = pk_cross
+        else:
+            diag.add(Anomaly(
+                kind="pk_crossing_fallback",
+                location="convergence pressure",
+                severity=Severity.INFO,
+                message=("The oil/gas average-MW crossing was degenerate (branches "
+                         "not converging above the table); the Singh App. B "
+                         "two-root average was used for Pk instead."),
+                suggested_fix="Inspect the top-node K-value trend, or set "
+                              "Config.convergence_pressure_Pk explicitly.",
+            ))
+    Pk = _resolve(config.convergence_pressure_Pk, pk_auto)
 
     if config.reservoir_temperature:
         T = config.reservoir_temperature
@@ -304,8 +325,13 @@ def build(table: BlackOilTable, config: Config,
             for k in ("p", "rs", "rv", "bo", "bg", "uo", "ug"):
                 ext[k] = ext[k][:fold]
 
-    pk_source = ("Singh App. B analytical estimate"
-                 if config.convergence_pressure_Pk is AUTO else "user-specified value")
+    if config.convergence_pressure_Pk is not AUTO:
+        pk_source = "user-specified value"
+    elif config.pk_method == "crossing":
+        pk_source = ("oil/gas average-MW crossing (single two-component "
+                     "criticality root)")
+    else:
+        pk_source = "Singh App. B two-root average"
     k_law = ("the K-values held constant (classic constant-K extension)"
              if k_mode == "constant"
              else "the K-values extended to K=1 at Pk")

@@ -162,8 +162,13 @@ class Config:
                                           # replaced by interpolation (refit after)
 
     # extension (high side, above the table toward Pk)
-    convergence_pressure_Pk = AUTO  # Singh App. B analytical value if AUTO
-    convergence_pressure_nodes: int = 2  # top-N nodes for App. B (2 = canonical)
+    convergence_pressure_Pk = AUTO  # analytical value if AUTO (see pk_method)
+    pk_method: str = "crossing"     # AUTO-Pk law: "crossing" locates the single
+                                    # convergence pressure as the oil/gas average-MW
+                                    # crossing (two-component criticality, x_g=y_g;
+                                    # one bounded root); "singh" uses the SPE 109596
+                                    # App. B two-K-root average (legacy fallback).
+    convergence_pressure_nodes: int = 2  # top-N nodes for Singh App. B (2 = canonical)
     first_extrap_node: int = -1     # index from the table end to anchor extrapolation
     n_extension_nodes: int = 15
     kvalue_extension: str = "convergence"  # high-side K law: "convergence" extends

@@ -8,6 +8,7 @@ import pytest
 from botkit import SurfaceFluids, read_excel
 from botkit.kvalues import (
     convergence_pressure,
+    convergence_pressure_crossing,
     kvalues,
     phase_properties,
     rs_rv_from_kvalues,
@@ -58,3 +59,33 @@ def test_convergence_pressure_above_table():
     kv = kvalues(table.pvto.rs[mask], table.pvtg.rv[mask], SURFACE)
     pk = convergence_pressure(table.pvto.p[mask], kv["ko"], kv["kg"], n_nodes=4)
     assert pk > table.pvto.p[mask].max()  # convergence is above the data
+
+
+def test_crossing_recovers_synthetic_value():
+    # oil MW falls, gas MW rises, both linear in p and equal at pk_true
+    pk_true = 6000.0
+    p = np.array([2000.0, 3000.0, 4000.0, 5000.0])
+    mwc = 80.0  # common average MW at criticality
+    mwo = mwc + 0.01 * (pk_true - p)   # falling toward mwc at pk
+    mwg = mwc - 0.02 * (pk_true - p)   # rising toward mwc at pk
+    pk = convergence_pressure_crossing(p, mwo, mwg)
+    assert pk == pytest.approx(pk_true, rel=1e-9)
+
+
+def test_crossing_returns_nan_when_degenerate():
+    # branches that do not converge above the table (both falling) -> nan
+    p = np.array([2000.0, 3000.0, 4000.0, 5000.0])
+    mwo = 90.0 - 0.005 * p
+    mwg = 70.0 - 0.001 * p
+    assert np.isnan(convergence_pressure_crossing(p, mwo, mwg))
+
+
+def test_crossing_above_table_on_example():
+    table = read_excel(DATA, surface=SURFACE)
+    mask = table.pvto.p <= 1800.0
+    kv = kvalues(table.pvto.rs[mask], table.pvtg.rv[mask], SURFACE)
+    mwo = SURFACE.oil_mw * kv["xo"] + SURFACE.gas_mw * kv["xg"]
+    mwg = SURFACE.oil_mw * kv["yo"] + SURFACE.gas_mw * kv["yg"]
+    pk = convergence_pressure_crossing(table.pvto.p[mask], mwo, mwg)
+    # either a bounded root above the table, or nan -> caller falls back to Singh
+    assert np.isnan(pk) or pk > table.pvto.p[mask].max()

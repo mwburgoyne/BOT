@@ -96,6 +96,11 @@ def convergence_pressure(p: np.ndarray, ko: np.ndarray, kg: np.ndarray,
     must be computed on the trusted locus only, i.e. after the misaligned tail has
     been removed.  The result may be sanity-checked against the K-value trend and
     overridden.
+
+    The oil and gas roots disagree increasingly away from the critical point and
+    run away for lean fluids (one K-line flattens, its root lands at millions of
+    psia or near zero); :func:`convergence_pressure_crossing` reaches the same
+    target in one bounded condition and is the default.
     """
     p = np.asarray(p, dtype=float)
     n = min(n_nodes, len(p))
@@ -115,3 +120,56 @@ def convergence_pressure(p: np.ndarray, ko: np.ndarray, kg: np.ndarray,
     pk_oil = solve_for_unity(ko)
     pk_gas = solve_for_unity(kg)
     return float(np.mean([pk_oil, pk_gas]))
+
+
+def convergence_pressure_crossing(p: np.ndarray, mwo: np.ndarray, mwg: np.ndarray,
+                                  n_nodes: int = 4) -> float:
+    """Convergence pressure as the oil/gas average-MW crossing (single root).
+
+    The two reservoir phases are mixtures of the same surface gas (light) and
+    stock-tank oil (heavy), so each phase's average molecular weight is the
+    composition coordinate of the two-component (Coats, SPE 50990) model.  As
+    pressure rises toward the critical point the oil phase takes up gas and its
+    average MW ``mwo`` falls, while the gas phase takes up heavy ends and ``mwg``
+    rises; at criticality the phases are identical, so x_g = y_g and the two
+    average MWs coincide.  Their crossing therefore locates the convergence
+    pressure in a *single* condition, from the table data plus the surface
+    molecular weights, with no EOS or LBC.
+
+    This is the molar-volume (M/gamma) coordinate of Whitson's note: molar volume
+    is the one quantity ideal (Amagat) mixing preserves, so a fluid and all its
+    splits ride one line indexed by average MW.  It reaches the same target as
+    Singh & Whitson (SPE 109596, App. B) but in one bounded root rather than two
+    K-roots averaged -- where Singh's oil and gas roots blow up away from critical,
+    the crossing stays finite.
+
+    Each branch is fitted linearly in ``p`` through the top ``n_nodes`` saturated
+    nodes (the validated probe used four) and solved for the crossing.  The fit is
+    valid only where the geometry is physical -- oil MW falling, gas MW rising, and
+    the crossing above the top node.  ``nan`` is returned otherwise so the caller
+    can fall back to :func:`convergence_pressure`.
+
+    Note: this locates the two-component criticality consistently, but which root
+    is closest to the true p_c is not yet validated against an EOS critical point
+    (the PhazeComp band run is built to answer that); it is the consistency-cleaner
+    estimate, not a proven-more-accurate one.
+    """
+    p = np.asarray(p, dtype=float)
+    mwo = np.asarray(mwo, dtype=float)
+    mwg = np.asarray(mwg, dtype=float)
+    n = min(n_nodes, len(p))
+    if n < 2:
+        raise ValueError("convergence_pressure_crossing needs at least two nodes")
+
+    pt = p[-n:]
+    slope_o, int_o = np.polyfit(pt, mwo[-n:], 1)   # oil MW falls with p
+    slope_g, int_g = np.polyfit(pt, mwg[-n:], 1)   # gas MW rises with p
+
+    denom = slope_o - slope_g
+    if denom == 0:
+        return float("nan")
+    pk = (int_g - int_o) / denom
+    # criticality must lie above the table, with the branches converging
+    if not np.isfinite(pk) or pk <= pt[-1] or slope_o >= 0 or slope_g <= 0:
+        return float("nan")
+    return float(pk)
