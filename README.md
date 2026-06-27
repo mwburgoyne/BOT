@@ -32,7 +32,8 @@ handling of the undersaturated branches and the near-critical region.
    stopping at a near-critical fold.
 7. Extends the saturated tables down to psc (K-value origin poles + binary VLE
    bijection; Bo, Bg and viscosity anchored at psc).
-8. Fills the undersaturated oil and gas branches.
+8. Fills the undersaturated oil and gas branches (optionally reconstructing
+   insufficiently-defined branches with a compact two-constant cubic).
 9. Writes an Eclipse PVTO/PVTG deck with the change summary in the header.
 
 ## Quick start
@@ -92,6 +93,7 @@ Detectors diagnose without changing the table. Fixes are applied only with
 | `negative_undersaturated_compressibility` | undersaturated Bo rising with pressure |
 | `undersat_viscosity_loglog` | undersaturated viscosity off log-p linearity |
 | `undersaturated_co_outlier` | a branch whose c_o sticks out from the smooth c_o(Psat) trend |
+| `insufficient_undersaturated` | an undersaturated oil branch left too thin to interpolate (no spanning line, common at low saturation pressures) |
 | `cgr_reversal` | low-pressure retrograde Rv that most simulators reject |
 | `assumed_temperature` | no reservoir temperature supplied; 680 R assumed |
 
@@ -145,6 +147,7 @@ Extension (high side, above the table toward Pk):
 | `n_extension_nodes` | `15` | saturated extension nodes to Pk |
 | `kvalue_extension` | `"convergence"` | high-side K law: `"convergence"` extends K to K=1 at Pk (default); `"constant"` freezes K (classic CKE) |
 | `n_undersaturated_nodes` | `10` | undersaturated rows per branch |
+| `undersaturated_method` | `"eos"` | undersaturated oil Bo source: `"eos"` regenerates every branch from the tuned EOS; `"compact"` reconstructs only the insufficiently-defined branches with the two-constant SRK cubic from the saturated anchor and its bubble-point compressibility (`botkit.undersat_extend`), keeping the EOS/LBC viscosity |
 | `output_pressures` | `()` | resample the saturated locus onto these pressures |
 | `extrapolate_shift_trend` | `False` | hold the volume shift flat above the table; True projects the fitted per-node trend |
 | `shift_trend_points` | `3` | last-N points that set the trend slope when the trend option is on |
@@ -162,6 +165,7 @@ Extension (low side, below the table down to psc):
 | `kg_low_pole_exp` | `2.0` | gas K-value origin-pole exponent, K_g = K_g(p1)*(p1/p)^exp |
 | `ko_low_pole_exp` | `0.5` | oil K-value origin-pole exponent, K_o = K_o(p1)*(p1/p)^exp |
 | `bo_psc_anchor` | `1.0` | Bo at psc (small thermal expansion ignored) |
+| `bg_low_method` | `"interp"` | low-side Bg fill: `"interp"` is 1/Bg PCHIP; `"compressibility"` integrates c_g down from the lowest node (psc-anchored, bounded in 1/p), reducing to the ideal 1/p in the limit |
 
 Master revert:
 
@@ -334,8 +338,9 @@ botkit/
   interpolate.py  composition-everywhere PCHIP layer
   qc.py           QC detectors; leave-one-out node prediction
   extend.py       high-side K-value extrapolation to Pk, EOS regeneration, fold detection
-  extend_low.py   low-side extension to psc (K-value origin poles + bijection, anchors)
+  extend_low.py   low-side extension to psc (K-value origin poles + bijection, anchors; optional c_g-integration Bg)
   fill.py         undersaturated branches, anchored to the measured node
+  undersat_extend.py  compact two-constant cubic + low-p gas c_g integration for insufficiently-defined branches
   report.py       markdown and JSON diagnostics; change summary; plots
   pipeline.py     orchestration: QC, fit, extend, fill, assemble, write
 tests/            pytest suite
@@ -354,4 +359,9 @@ and convergence-pressure extension of Singh, Fevang and Whitson, SPE 109596
 (2007); Peng and Robinson (1976/1978); Peneloux, Rauzy and Freze (1982);
 Lohrenz, Bray and Clark (1964); and the Standing-era oil-property correlations.
 The composition-everywhere interpolation basis and the per-phase abscissa choices
-follow the companion Black-Oil PVT lookup work.
+follow the companion Black-Oil PVT lookup work, as does the compact
+undersaturated-FVF reconstruction (`undersat_extend.py`): a two-pseudocomponent
+SRK cubic (Soave, 1972) cast in the Whitson-Torp/Coats molar-density framework,
+with the bubble-point compressibility c_o(pb) sourced from a Vasquez-Beggs/McCain
+correlation or the tuned EOS, and a psc-anchored compressibility integration for
+the low-pressure gas branch.
