@@ -24,6 +24,8 @@ from .extend import extend_saturated, extrapolate_kvalues
 from .extend_low import extend_below_pmin
 from .fill import (fill_gas_branch, fill_oil_branch, undersaturated_pressures,
                    undersaturated_rv_grid)
+from . import undersat_extend
+from .undersat_extend import branch_is_under_defined
 from .interpolate import SaturatedInterpolator
 from .kvalues import (convergence_pressure, convergence_pressure_crossing,
                       kvalues, phase_properties)
@@ -366,7 +368,8 @@ def build(table: BlackOilTable, config: Config,
             sat_p, sat_rs, sat_rv, sat_bo, sat_bg, sat_uo, sat_ug, s,
             psc=config.psc, n_nodes=config.n_low_extension_nodes,
             kg_exp=config.kg_low_pole_exp, ko_exp=config.ko_low_pole_exp,
-            bo_psc=config.bo_psc_anchor, reservoir_temperature=T_for_bg)
+            bo_psc=config.bo_psc_anchor, reservoir_temperature=T_for_bg,
+            bg_method=config.bg_low_method)
         if low is not None:
             sat_p = np.concatenate([low["p"], sat_p])
             sat_rs = np.concatenate([low["rs"], sat_rs])
@@ -460,17 +463,54 @@ def build(table: BlackOilTable, config: Config,
     so_node = np.asarray(so_interp(sat_p), dtype=float)
     sg_node = np.asarray(sg_interp(sat_p), dtype=float)
 
+    # compact reconstruction reaches for the input table's measured rows to
+    # decide which oil branches were left insufficiently defined.
+    in_p = table.pvto.p
+    in_usat = table.pvto.usat
+
     o_usat, g_usat = [], []
+    n_compact = 0
     for i in range(len(sat_p)):
-        o_usat.append(fill_oil_branch(
+        oil_rows = fill_oil_branch(
             sat_p[i], sat_rs[i], sat_bo[i], sat_uo[i], fr.params, fr.lbc, s,
-            p_grid, so_node[i], sg_node[i])[1:])  # drop saturated dup
+            p_grid, so_node[i], sg_node[i])  # row 0 is the saturated anchor
+        if config.undersaturated_method == "compact":
+            j = int(np.argmin(np.abs(in_p - sat_p[i])))
+            measured = (in_usat[j] if abs(in_p[j] - sat_p[i]) <= 1e-3 * sat_p[i]
+                        else None)
+            if branch_is_under_defined(float(sat_p[i]), measured) \
+                    and oil_rows.shape[0] > 2:
+                # bubble-point compressibility from the tuned EOS step, then the
+                # two-constant cubic carries the curvature down the branch.
+                p_b, bo_b = oil_rows[:, 0], oil_rows[:, 1]
+                co_pb = -(bo_b[1] - bo_b[0]) / (bo_b[0] * (p_b[1] - p_b[0]))
+                if np.isfinite(co_pb) and co_pb > 0:
+                    try:
+                        bo_new, _ = undersat_extend.compact_oil_bo(
+                            float(sat_p[i]), float(sat_rs[i]), float(sat_bo[i]),
+                            s, fr.params.T, p_b[1:], measured=None, co_pb=co_pb)
+                        if np.all(np.isfinite(bo_new)):
+                            oil_rows[1:, 1] = bo_new  # keep EOS/LBC viscosity
+                            n_compact += 1
+                    except ValueError:
+                        pass  # anchor solve failed; keep the EOS fill
+        o_usat.append(oil_rows[1:])  # drop saturated dup
         if config.enforce_monotonic_cgr and i < cgr_idx:
             g_usat.append(np.empty((0, 3)))  # flattened nodes carry no usat gas
         else:
             g_usat.append(fill_gas_branch(
                 sat_p[i], sat_rv[i], sat_bg[i], sat_ug[i], fr.params, fr.lbc, s,
                 rv_grid, so_node[i], sg_node[i])[1:])
+
+    if config.undersaturated_method == "compact" and n_compact:
+        cl.add(
+            action=f"Reconstructed {n_compact} insufficiently-defined "
+                   f"undersaturated oil branch(es) with the compact cubic.",
+            reason="These branches lacked a spanning undersaturated line; the "
+                   "two-constant SRK cubic (Whitson & Torp / Coats compositional "
+                   "cast) carries the curvature from the saturated anchor and its "
+                   "bubble-point compressibility, with the EOS/LBC viscosity kept.",
+        )
 
     pvto = PVTOTable(rs=sat_rs, p=sat_p, bo=sat_bo, uo=sat_uo, usat=o_usat)
     pvtg = PVTGTable(p=sat_p, rv=sat_rv, bg=sat_bg, ug=sat_ug, usat=g_usat)

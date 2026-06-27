@@ -177,6 +177,12 @@ class Config:
                                            # best); "constant" freezes K (CKE).
                                            # whitson_mode forces "constant".
     n_undersaturated_nodes: int = 10
+    undersaturated_method: str = "eos"  # "eos" regenerates every undersaturated
+                                        # oil branch from the tuned EOS; "compact"
+                                        # reconstructs only insufficiently-defined
+                                        # branches with the two-constant cubic
+                                        # (botkit.undersat_extend), honouring any
+                                        # measured rows, EOS elsewhere.
 
     # extension (low side, below the table down to psc)
     extend_to_psc: bool = True      # continue the saturated locus below p_min to psc
@@ -185,6 +191,10 @@ class Config:
     kg_low_pole_exp: float = 2.0    # K_g = K_g(p1)*(p1/p)^exp (Curtis K_g.p^2)
     ko_low_pole_exp: float = 0.5    # K_o = K_o(p1)*(p1/p)^exp (bopvt n_o=0.5)
     bo_psc_anchor: float = 1.0      # Bo at psc (small thermal expansion ignored)
+    bg_low_method: str = "interp"   # low-side Bg fill: "interp" is 1/Bg PCHIP;
+                                    # "compressibility" integrates c_g down from
+                                    # the lowest node (psc-anchored, bounded in
+                                    # 1/p) - the bopvt-lookup low-p gas method
 
     # master revert: classic conservative behaviour. True -> constant-K high side
     # (CKE) and no low-side extension to psc.

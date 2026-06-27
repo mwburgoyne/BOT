@@ -363,6 +363,40 @@ def detect_undersaturated_compressibility_trend(table: BlackOilTable,
         ))
 
 
+def detect_insufficient_undersaturated(table: BlackOilTable, diag: Diagnostics,
+                                       min_rows: int = 2,
+                                       min_span_frac: float = 0.5) -> None:
+    """Flag undersaturated oil branches too thin to interpolate reliably.
+
+    A branch with fewer than ``min_rows`` rows, or whose pressure span is below
+    ``min_span_frac`` of its saturation pressure, does not bracket the
+    undersaturated range - common at low saturation pressures whose lines were
+    never fully measured.  Such branches are candidates for the compact
+    reconstruction in :mod:`botkit.undersat_extend`; the detector only flags
+    them, it does not modify the table.
+    """
+    from .undersat_extend import branch_is_under_defined
+
+    o = table.pvto
+    for i, rows in enumerate(o.usat):
+        if not branch_is_under_defined(float(o.p[i]), rows,
+                                       min_rows=min_rows,
+                                       min_span_frac=min_span_frac):
+            continue
+        nrows = 0 if rows is None else int(rows.shape[0])
+        diag.add(Anomaly(
+            kind="insufficient_undersaturated",
+            location=f"undersaturated oil branch at Psat = {o.p[i]:g} psia",
+            severity=Severity.INFO,
+            message=(f"Undersaturated oil branch has {nrows} row(s) and does not "
+                     f"span the pressure range; insufficiently defined for "
+                     f"interpolation."),
+            suggested_fix="Reconstruct with undersaturated_method='compact' "
+                          "(botkit.undersat_extend) from the saturated anchor "
+                          "and its bubble-point compressibility.",
+        ))
+
+
 def detect_cgr_reversal(table: BlackOilTable, diag: Diagnostics,
                         cut: Optional[float] = None,
                         enforce_monotonic: bool = True) -> Optional[float]:
@@ -431,6 +465,7 @@ def run_qc(table: BlackOilTable, cut: Optional[float] = None,
     detect_undersaturated_compressibility(table, diag)
     detect_bo_rs_linearity(table, diag, cut=use_cut)
     detect_undersat_viscosity_loglog(table, diag)
+    detect_insufficient_undersaturated(table, diag)
     cgr_floor = detect_cgr_reversal(table, diag, cut=use_cut,
                                     enforce_monotonic=enforce_monotonic_cgr)
 

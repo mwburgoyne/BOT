@@ -20,7 +20,12 @@ continues the table down to psc using the K-value machinery the companion
 * **Bg** is anchored at psc to a Z = 1 ideal-gas value when a reservoir
   temperature is known; otherwise the gas Z is effectively frozen and Bg(psc) is
   taken by the isothermal pressure ratio Bg(p1)*(p1/psc) (T cancels).  Filled by
-  1/Bg interpolation.
+  1/Bg interpolation by default, or (``bg_method="compressibility"``) by
+  integrating the gas compressibility down from the lowest node,
+  Bg = Bg(p1)*exp(-INT c_g dp), with c_g bounded-interpolated in 1/p between the
+  exact ideal value c_g(psc) = 1/psc and the node -- the deployable low-pressure
+  gas method of the companion study, a strict improvement on the naive 1/p rule
+  that reduces to it in the ideal limit.
 * **viscosities** continue the mobilities 1/(Bo*uo) (log p) and 1/(Bg*ug)
   (plain p) -- the established interpolation coordinates -- divided by the
   anchored B.  Flagged as extrapolated; LBC is *not* used down here because its
@@ -40,6 +45,7 @@ from scipy.interpolate import PchipInterpolator
 
 from .kvalues import kvalues, rs_rv_from_kvalues
 from .model import FT3_PER_BBL, GAS_MOLAR_VOLUME_MSCF, R_FIELD, SurfaceFluids
+from .undersat_extend import extend_bg_compressibility
 
 
 def ideal_bg(temperature_R: float, p: float) -> float:
@@ -55,7 +61,8 @@ def extend_below_pmin(p, rs, rv, bo, bg, uo, ug, surface: SurfaceFluids, *,
                       psc: float = 14.696, n_nodes: int = 8,
                       kg_exp: float = 2.0, ko_exp: float = 0.5,
                       bo_psc: float = 1.0,
-                      reservoir_temperature: Optional[float] = None
+                      reservoir_temperature: Optional[float] = None,
+                      bg_method: str = "interp"
                       ) -> Optional[Dict[str, object]]:
     """Build the saturated locus from just below p1 down to and including psc.
 
@@ -118,9 +125,32 @@ def extend_below_pmin(p, rs, rv, bo, bg, uo, ug, surface: SurfaceFluids, *,
     else:
         bg_psc = bg[a] * (p1 / psc)
         bg_basis = "frozen-Z pressure ratio Bg(p1)*p1/psc (no reservoir temperature)"
-    inv_bg = PchipInterpolator(xp, np.concatenate(([1.0 / bg_psc], 1.0 / bg)),
-                              extrapolate=True)
-    bg_e = 1.0 / inv_bg(grid)
+
+    # local gas compressibility at the anchor node, from the saturated Bg locus
+    cg_p1 = (-(np.log(bg[a + 1]) - np.log(bg[a])) / (p[a + 1] - p[a])
+             if a + 1 < len(p) else np.nan)
+    if bg_method == "compressibility" and np.isfinite(cg_p1) and cg_p1 > 0:
+        # Bg = Bg(p1) * exp(-INTEGRAL c_g dp), with c_g bounded-interpolated in
+        # 1/p between the exact ideal-gas value c_g(psc) = 1/psc and the anchor.
+        # Anchored at the data node p1 so the extension joins the locus, and
+        # well-conditioned (a few-% c_g error integrates to a few-% Bg, no
+        # amplification). Reduces to the Z=1 ideal Bg ~ 1/p in the low-p limit.
+        # bopvt-lookup gas_lowp_methods.py (27 Jun 2026); validated 1-4% vs the
+        # exact EOS where the naive 1/p rule sat at 8-21%.
+        q = np.concatenate(([p1], grid[::-1]))           # descend p1 -> psc
+        bg_chain = extend_bg_compressibility(q, p1, float(bg[a]), float(cg_p1),
+                                             p1, psc)
+        bg_e = bg_chain[1:][::-1]                         # back to ascending grid
+        bg_psc = float(bg_e[0])
+        bg_basis = ("psc-anchored c_g integration (bounded in 1/p) "
+                    "Bg=Bg(p1)*exp(-INT c_g dp)")
+    else:
+        if bg_method == "compressibility":
+            flags.append("compressibility Bg unavailable (need >=2 bottom nodes "
+                         "with positive c_g); used 1/Bg interpolation")
+        inv_bg = PchipInterpolator(xp, np.concatenate(([1.0 / bg_psc], 1.0 / bg)),
+                                  extrapolate=True)
+        bg_e = 1.0 / inv_bg(grid)
 
     # viscosities: continue the mobilities and divide out the anchored B
     mob_o = PchipInterpolator(np.log(p), 1.0 / (bo * uo), extrapolate=True)
