@@ -447,7 +447,7 @@ def detect_cgr_reversal(table: BlackOilTable, diag: Diagnostics,
 
 
 def run_qc(table: BlackOilTable, cut: Optional[float] = None,
-           enforce_monotonic_cgr: bool = True
+           enforce_monotonic_cgr: bool = False
            ) -> Tuple[Diagnostics, Dict[str, float]]:
     """Run all detectors and return diagnostics plus derived suggestions.
 

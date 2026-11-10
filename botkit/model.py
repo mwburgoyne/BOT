@@ -156,7 +156,9 @@ class Config:
 
     # QC / table-trimming
     saturated_cut = AUTO            # highest shared saturated pressure to keep
-    enforce_monotonic_cgr: bool = True
+    enforce_monotonic_cgr: bool = False  # opt-in: flatten the low-pressure
+                                    # retrograde Rv rise for simulators that
+                                    # reject non-monotonic saturated Rv
     co_trend_tol: float = 0.5       # flag undersat oil branches whose c_o departs
                                     # from the smooth c_o(psat) trend by > this frac
     manual_replace_pressures: tuple = ()  # pressures whose saturated node is

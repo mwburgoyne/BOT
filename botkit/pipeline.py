@@ -379,7 +379,7 @@ def build(table: BlackOilTable, config: Config,
             sat_uo = np.concatenate([low["uo"], sat_uo])
             sat_ug = np.concatenate([low["ug"], sat_ug])
             cl.add(
-                action=f"Extended the saturated tables below {low['p1']:g} psia "
+                action=f"Extended the saturated tables below {low['p_top']:g} psia "
                        f"down to psc = {config.psc:g} psia "
                        f"({len(low['p'])} node(s)).",
                 reason=f"Simulators drive flowing pressure toward psc, so the "
@@ -393,7 +393,7 @@ def build(table: BlackOilTable, config: Config,
             for f in low["flags"]:
                 diag.add(Anomaly(
                     kind="low_side_extension",
-                    location=f"below {low['p1']:g} psia",
+                    location=f"below {low['p_top']:g} psia",
                     severity=Severity.WARN,
                     message=f"Low-side extension toward psc: {f}.",
                     suggested_fix="Review the bottom saturated rows or set "
@@ -434,10 +434,13 @@ def build(table: BlackOilTable, config: Config,
         )
 
     # optional simulator-compliance fix: truncate non-monotonic low-P Rv
+    # Decided on the assembled locus (trusted + low-side extension + any
+    # resampling), not on QC of the trusted locus alone: the extension's rising
+    # r_s toward psc can create a reversal the input table did not have.
     cgr_idx = 0  # number of low-pressure nodes flattened to the retrograde minimum
-    if config.enforce_monotonic_cgr and "cgr_floor" in result.suggestions:
-        floor = result.suggestions["cgr_floor"]
+    if config.enforce_monotonic_cgr:
         cgr_idx = int(np.argmin(sat_rv))
+        floor = float(sat_rv[cgr_idx])
         if cgr_idx > 0:
             cl.add(
                 action=f"Flattened saturated Rv at {cgr_idx} node(s) below "
@@ -458,8 +461,6 @@ def build(table: BlackOilTable, config: Config,
     # residual non-physical branch for review.
     p_grid = undersaturated_pressures(float(sat_p.min()), fr.Pk,
                                       config.n_undersaturated_nodes)
-    rv_grid = undersaturated_rv_grid(float(sat_rv.min()), float(sat_rv.max()),
-                                     config.n_undersaturated_nodes)
     so_node = np.asarray(so_interp(sat_p), dtype=float)
     sg_node = np.asarray(sg_interp(sat_p), dtype=float)
 
@@ -498,6 +499,9 @@ def build(table: BlackOilTable, config: Config,
         if config.enforce_monotonic_cgr and i < cgr_idx:
             g_usat.append(np.empty((0, 3)))  # flattened nodes carry no usat gas
         else:
+            # per-node grid from the node's own saturated Rv down to dry gas
+            rv_grid = undersaturated_rv_grid(0.0, float(sat_rv[i]),
+                                             config.n_undersaturated_nodes)
             g_usat.append(fill_gas_branch(
                 sat_p[i], sat_rv[i], sat_bg[i], sat_ug[i], fr.params, fr.lbc, s,
                 rv_grid, so_node[i], sg_node[i])[1:])

@@ -63,13 +63,13 @@ def test_low_side_extension_to_psc():
 
 
 def test_monotonic_cgr_governs_low_side_rv():
-    # Default enforces monotonic saturated Rv: the low-side extension nodes are
-    # flattened to the retrograde floor. Toggling the flag off keeps the
-    # physically realistic non-monotonic retrograde rise toward psc.
+    # Opting in to monotonic saturated Rv flattens the low-side extension nodes
+    # to the retrograde floor. The default keeps the physically realistic
+    # non-monotonic retrograde rise toward psc.
     table = read_excel(DATA, surface=SURFACE)
-    cfg_on = Config(); cfg_on.auto_apply_fixes = True   # enforce_monotonic_cgr True
+    cfg_on = Config(); cfg_on.auto_apply_fixes = True
+    cfg_on.enforce_monotonic_cgr = True
     cfg_off = Config(); cfg_off.auto_apply_fixes = True
-    cfg_off.enforce_monotonic_cgr = False
     e_on = pipeline.build(table, cfg_on).extended
     e_off = pipeline.build(table, cfg_off).extended
 

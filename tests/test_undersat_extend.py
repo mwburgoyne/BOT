@@ -218,3 +218,116 @@ def test_pipeline_compact_method_builds_and_logs():
         assert np.all(np.diff(bo) <= 1e-9), f"Bo not monotone at node {i}"
     # the compact reconstruction ran and was recorded
     assert any("compact cubic" in c.action for c in res.changes.changes)
+
+
+# --- low-side extension when the table already carries an Rs = 0 psc node ---
+
+def _locus_with_psc_node(psc_value):
+    p, rs, rv, bo, bg, uo, ug = _synthetic_locus()
+    return (np.concatenate(([psc_value], p)), np.concatenate(([0.0], rs)),
+            np.concatenate(([0.05], rv)), np.concatenate(([1.02], bo)),
+            np.concatenate(([200.0], bg)), np.concatenate(([1.5], uo)),
+            np.concatenate(([0.012], ug)))
+
+
+@pytest.mark.parametrize("psc_value", [14.696, 14.696000000000002])
+def test_extend_low_skips_table_that_reaches_psc(psc_value):
+    # The K-value anchor is the lowest Rs>0 node, but a table whose lowest node
+    # already sits at psc needs no extension: prepending a second psc node gave
+    # non-ascending saturated pressures and a PCHIP "strictly increasing" error.
+    from botkit.extend_low import extend_below_pmin
+    assert extend_below_pmin(*_locus_with_psc_node(psc_value), SURFACE) is None
+
+
+def test_extend_low_grid_stays_below_lowest_node():
+    # An Rs = 0 node above psc (dead-oil vertex at 50 psia): K is anchored at the
+    # lowest Rs>0 node, yet the new nodes must stop below the lowest input node.
+    from botkit.extend_low import extend_below_pmin
+    args = list(_locus_with_psc_node(50.0))
+    low = extend_below_pmin(*args, SURFACE)
+    assert low is not None
+    assert np.all(low["p"] < 50.0) and low["p"][0] == pytest.approx(14.696)
+    assert low["p_top"] == 50.0 and low["p1"] == 500.0
+    assert any("lowest Rs>0 node" in f for f in low["flags"])
+
+
+def _example_with_psc_node():
+    from botkit.model import BlackOilTable, PVTGTable, PVTOTable
+    t = read_excel(DATA, surface=SURFACE)
+    o, g = t.pvto, t.pvtg
+    pvto = PVTOTable(rs=np.r_[0.0, o.rs], p=np.r_[14.696, o.p],
+                     bo=np.r_[1.03, o.bo], uo=np.r_[2.0 * o.uo[0], o.uo],
+                     usat=[np.empty((0, 3))] + list(o.usat))
+    pvtg = PVTGTable(p=np.r_[14.696, g.p], rv=np.r_[0.05, g.rv],
+                     bg=np.r_[g.bg[0] * g.p[0] / 14.696, g.bg],
+                     ug=np.r_[0.98 * g.ug[0], g.ug],
+                     usat=[np.empty((0, 3))] + list(g.usat))
+    return BlackOilTable(pvto, pvtg, SURFACE)
+
+
+def test_pipeline_builds_when_table_reaches_psc():
+    table = _example_with_psc_node()
+    cfg = Config()
+    cfg.auto_apply_fixes = True
+    cfg.convergence_pressure_Pk = 6000.0
+    e = pipeline.build(table, cfg).extended
+    for arr in (e.pvto.p, e.pvtg.p):
+        assert np.all(np.diff(arr) > 0)            # strictly ascending, one psc node
+        assert arr[0] == pytest.approx(14.696)
+    # the stored psc node survives untouched (honour input data)
+    assert e.pvtg.rv[0] == pytest.approx(0.05)
+
+
+def test_enforce_monotonic_cgr_is_opt_in():
+    # Off by default: the low-pressure retrograde rise in saturated Rv is real
+    # and is kept; flattening it is a simulator-compliance choice the user makes.
+    assert Config().enforce_monotonic_cgr is False
+
+
+def test_gas_branches_reach_dry_gas_per_node():
+    # Each node's undersaturated gas branch runs from its own saturated Rv down
+    # to Rv = 0 (the dry-gas end of a PVTG table). A single grid spanning the
+    # whole locus left low-Rv nodes with one row or none and never reached 0.
+    table = read_excel(DATA, surface=SURFACE)
+    cfg = Config()
+    cfg.auto_apply_fixes = True
+    cfg.convergence_pressure_Pk = 6000.0
+    e = pipeline.build(table, cfg).extended
+    n = cfg.n_undersaturated_nodes
+    for rv_sat, rows in zip(e.pvtg.rv, e.pvtg.usat):
+        if rv_sat <= 0:
+            continue
+        assert rows.shape[0] == n                 # same resolution on every node
+        assert rows[-1, 0] == 0.0                 # ends at dry gas
+        assert np.all(np.diff(rows[:, 0]) < 0) and rows[0, 0] < rv_sat
+        assert np.all(rows[:, 1] > 0) and np.all(rows[:, 2] > 0)
+
+
+def _example_cut_at_rv_minimum():
+    # Drop the nodes below the example's Rv minimum (800 psia): the trusted locus
+    # is then monotone, and only the low-side extension creates a reversal.
+    from botkit.model import BlackOilTable, PVTGTable, PVTOTable
+    t = read_excel(DATA, surface=SURFACE)
+    o, g = t.pvto, t.pvtg
+    mo, mg = o.p >= 800.0, g.p >= 800.0
+    pvto = PVTOTable(rs=o.rs[mo], p=o.p[mo], bo=o.bo[mo], uo=o.uo[mo],
+                     usat=[u for u, k in zip(o.usat, mo) if k])
+    pvtg = PVTGTable(p=g.p[mg], rv=g.rv[mg], bg=g.bg[mg], ug=g.ug[mg],
+                     usat=[u for u, k in zip(g.usat, mg) if k])
+    return BlackOilTable(pvto, pvtg, SURFACE)
+
+
+def test_enforce_monotonic_cgr_floors_extension_created_reversal():
+    table = _example_cut_at_rv_minimum()
+    cfg = Config()
+    cfg.auto_apply_fixes = True
+    cfg.convergence_pressure_Pk = 6000.0
+    cfg.enforce_monotonic_cgr = True
+    res = pipeline.build(table, cfg)
+    rv = res.extended.pvtg.rv
+    assert np.all(np.diff(rv) >= -1e-15)          # monotone after the opt-in fix
+    assert any("Flattened saturated Rv" in c.action for c in res.changes.changes)
+    # default (off) keeps the extension's rising r_s toward psc
+    cfg.enforce_monotonic_cgr = False
+    rv_off = pipeline.build(table, cfg).extended.pvtg.rv
+    assert rv_off[0] > rv_off.min()

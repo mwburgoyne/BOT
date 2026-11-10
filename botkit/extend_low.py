@@ -68,8 +68,9 @@ def extend_below_pmin(p, rs, rv, bo, bg, uo, ug, surface: SurfaceFluids, *,
 
     ``p`` and the property arrays are the assembled saturated locus (ascending in
     pressure assumed after the internal sort).  Returns a dict of extension
-    arrays (ascending, ending just below the lowest input node) plus a list of
-    flag strings, or ``None`` when the table already reaches psc.
+    arrays (ascending, ending just below the lowest input node ``p_top``) plus a
+    list of flag strings, or ``None`` when the table already reaches psc. The
+    K-value poles are anchored at ``p1``, the lowest node with Rs > 0.
     """
     p = np.asarray(p, dtype=float)
     order = np.argsort(p)
@@ -78,19 +79,28 @@ def extend_below_pmin(p, rs, rv, bo, bg, uo, ug, surface: SurfaceFluids, *,
     bo, bg = np.asarray(bo, float)[order], np.asarray(bg, float)[order]
     uo, ug = np.asarray(uo, float)[order], np.asarray(ug, float)[order]
 
-    # anchor at the lowest node carrying dissolved gas (the last positive-K_o node)
+    # The new nodes go strictly below the lowest input node: a table that
+    # already reaches psc (an Rs = 0 stock-tank node there) needs none, and
+    # prepending another psc node would duplicate it.
+    p_top = float(p[0])
+    if p_top <= psc * 1.0001:
+        return None
+    flags = []
+
+    # K-value anchor: the lowest node carrying dissolved gas (K_g is undefined
+    # where Rs = 0). Usually the lowest node; flagged when it is not.
     pos = np.where(rs > 0.0)[0]
     a = int(pos[0]) if pos.size else 0
     p1 = float(p[a])
-    if p1 <= psc * 1.0001:
-        return None
+    if a > 0:
+        flags.append(f"K-values anchored at the lowest Rs>0 node {p1:g} psia, "
+                     f"above the lowest input node {p_top:g} psia")
 
     kv = kvalues(rs, rv, surface)
     ko1, kg1 = float(kv["ko"][a]), float(kv["kg"][a])
-    flags = []
 
-    # low-side grid: psc .. p1, log-spaced, including psc but excluding p1
-    grid = np.exp(np.linspace(np.log(psc), np.log(p1), n_nodes + 1))[:-1]
+    # low-side grid: psc .. p_top, log-spaced, including psc but excluding p_top
+    grid = np.exp(np.linspace(np.log(psc), np.log(p_top), n_nodes + 1))[:-1]
 
     # K-value origin-pole extrapolation, then the binary VLE bijection for Rs, Rv
     ratio = p1 / grid
@@ -163,6 +173,6 @@ def extend_below_pmin(p, rs, rv, bo, bg, uo, ug, surface: SurfaceFluids, *,
 
     return {
         "p": grid, "rs": rs_e, "rv": rv_e, "bo": bo_e, "bg": bg_e,
-        "uo": uo_e, "ug": ug_e, "p1": p1, "bg_basis": bg_basis,
+        "uo": uo_e, "ug": ug_e, "p1": p1, "p_top": p_top, "bg_basis": bg_basis,
         "bg_psc": bg_psc, "flags": flags,
     }

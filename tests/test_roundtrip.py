@@ -93,6 +93,7 @@ def test_change_log_records_fixes_with_reasons():
     cfg = Config()
     cfg.auto_apply_fixes = True
     cfg.convergence_pressure_Pk = 6000.0
+    cfg.enforce_monotonic_cgr = True     # opt in so the Rv truncation is logged
     res = pipeline.build(table, cfg)
 
     actions = " ".join(c.action for c in res.changes.changes)

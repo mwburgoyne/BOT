@@ -24,9 +24,15 @@ def undersaturated_pressures(min_psat: float, Pk: float, n: int) -> np.ndarray:
 
 
 def undersaturated_rv_grid(min_rv: float, max_rv: float, n: int) -> np.ndarray:
-    """Reducing Rv values below the saturated value (square-root progression)."""
+    """Reducing Rv values from ``max_rv`` down to ``min_rv`` (square-root
+    progression, ``n + 1`` points). The build calls it per node with
+    ``max_rv`` = the node's saturated Rv and ``min_rv`` = 0 (dry gas)."""
     incr = (max_rv ** 0.5 - min_rv ** 0.5) / n
-    return np.array([(max_rv ** 0.5 - i * incr) ** 2 for i in range(n + 1)])
+    grid = np.array([(max_rv ** 0.5 - i * incr) ** 2 for i in range(n + 1)])
+    grid[0], grid[-1] = max_rv, min_rv    # exact endpoints: (sqrt x)**2 can round
+                                          # below x (duplicating the saturated row)
+                                          # and dry gas must read 0, not 1e-34
+    return grid
 
 
 def fill_oil_branch(psat: float, rs: float, bo_sat: float, uo_sat: float,

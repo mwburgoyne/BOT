@@ -132,7 +132,7 @@ QC and trimming:
 | Option | Default | Meaning |
 |---|---|---|
 | `saturated_cut` | `AUTO` | highest shared saturated pressure to keep |
-| `enforce_monotonic_cgr` | `True` | flatten low-pressure saturated Rv for simulator compliance |
+| `enforce_monotonic_cgr` | `False` | opt in to flatten low-pressure saturated Rv for simulators that reject a non-monotonic profile |
 | `co_trend_tol` | `0.5` | flag an undersaturated branch whose c_o departs this fraction from the trend |
 | `manual_replace_pressures` | `()` | pressures whose saturated node is replaced by interpolation |
 
@@ -248,6 +248,15 @@ Bg(p1)*(p1/psc), then filled by 1/Bg interpolation. Viscosities continue the
 mobilities 1/(Bo*uo) and 1/(Bg*ug) in their established coordinates, divided by the
 anchored B, and are flagged as extrapolated; LBC is not used here because its
 low-pressure VcVis fit is the very thing the build drops as ill-conditioned.
+A table that already carries a psc node is not extended; new nodes always sit
+strictly below the lowest input node.
+
+Rv is the least certain quantity down here. Against EOS truth on 16 tables cut at
+40, 150 and 400 psia (47 cases), the extended Rv at the dropped nodes has a median
+error of a factor of about 4 with these exponents. The K_g exponent barely matters
+for Rv; a K_o exponent of 0.75 lowers the median to about 2.8 but loses on some
+fluids, so it is not the default. Where Rv near psc matters, supply measured or
+EOS-generated low-pressure nodes rather than relying on the extension.
 
 EOS regression. The global PR fit uses per-node oil and gas molar-volume
 residuals. The large low-pressure gas molar volumes cannot be matched by a +/-0.2
@@ -305,14 +314,15 @@ Near-critical fold. Extending to a high Pk drives the fluid toward its critical
 point, where the K-value extrapolation can fold (Bo or Bg reversing). The fold is
 detected and the extension truncated below it.
 
-Monotonic Rv. The retrograde low-pressure rise in saturated Rv is real, but most
-simulators reject it. With `enforce_monotonic_cgr` on (the default), the
-low-pressure saturated Rv is flattened to its retrograde minimum and the
-undersaturated gas lines on those nodes are dropped; this covers both the original
-in-table reversal and the steep retrograde rise the low-side extension produces
-toward psc (the K-value bijection gives a finite, rising r_s there). With it off,
-the full non-monotonic profile is kept as the more physically realistic behaviour
-and reported as a note. The K-values and compositions are intermediate and not
+Monotonic Rv. The retrograde low-pressure rise in saturated Rv is real: below
+the Rv minimum the liberated gases get richer toward psc (on one EOS-generated
+volatile oil, 238 STB/MMscf at psc against a 0.26 minimum near 600 psia). By
+default the full non-monotonic profile is kept and reported as a note. Some
+simulators reject it; setting `enforce_monotonic_cgr = True` flattens the
+low-pressure saturated Rv to its retrograde minimum and drops the undersaturated
+gas lines on those nodes, covering both the original in-table reversal and the
+rising r_s the low-side extension produces toward psc. Flattening overwrites
+measured Rv nodes, so it is opt-in. The K-values and compositions are intermediate and not
 written to the deck, and the measured Bg and ug are honoured, so nothing is
 recomputed from the flattened Rv.
 

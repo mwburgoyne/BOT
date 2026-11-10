@@ -78,7 +78,7 @@ BOT_util/
   - `first_extrap_node` (was `last_row`)
   - `n_extension_nodes`, `n_undersaturated_nodes`
   - `eos_fallback_tol` (default 5% — gate the EOS off above this)
-  - `enforce_monotonic_cgr` (the cell-33 retrograde fix, generalized)
+  - `enforce_monotonic_cgr` (the cell-33 retrograde fix, generalized; opt-in, default False)
   - `auto_apply_fixes` (False = approval required; True = apply + log)
   - `reservoir_temperature` (required/known by default; set `regress_temperature=True` to treat it as an unknown and regress it, as the original notebook did)
 - `Diagnostics` — list of `Anomaly(kind, location, severity, message,
